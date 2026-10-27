@@ -14,6 +14,10 @@ pip install -e ".[dev]"
 cp .env.example .env   # add API keys
 cardtracker init-db
 pytest
+
+cardtracker stats nfl 2025     # NFL season stats from nflverse
+cardtracker stats nba 2025     # NBA 2025-26 stats (run from a home connection)
+cardtracker runs               # recent ingestion runs; exits 1 if any are unhealthy
 ```
 
 ## Layout
@@ -22,6 +26,10 @@ pytest
 src/cardtracker/
   schema.sql            canonical tables (players, cards, sales, listings, pop_snapshots, player_stats)
   db.py                 connection, schema init, raw payload storage
+  fetcher.py            shared HTTP: robots.txt, rate limits, backoff, stop on block
+  runs.py               per-run health tracking (source_runs)
+  stats/nfl.py          nflverse season stats
+  stats/nba.py          stats.nba.com season stats
   ingest/psa.py         PSA Public API — population snapshots
   ingest/ebay_browse.py eBay Browse API — active listings
   analytics/index.py    median card prices, player price index

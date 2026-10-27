@@ -1,0 +1,4 @@
+player_id,player_display_name,position,season,games,passing_yards,passing_tds,passing_epa,rushing_yards,receiving_yards,receiving_tds,targets,target_share,fantasy_points_ppr
+00-0023459,Aaron Rodgers,QB,2025,16,3322,24,28.3245858144168,61,-9,0,1,0.00191570881226054,227.08
+00-0030035,Adam Thielen,WR,2025,14,0,0,,0,186,0,35,0.0747863247863248,39.6
+00-0027962,Cameron Jordan,LB,2025,17,0,0,,0,0,0,0,0,0

@@ -6,9 +6,16 @@ CREATE TABLE IF NOT EXISTS players (
     sport         TEXT NOT NULL,          -- 'basketball', 'baseball', 'football', ...
     position      TEXT,
     birth_date    TEXT,
-    debut_season  INTEGER,
-    external_ids  TEXT,                   -- JSON: {"nba_api": 1629029, ...}
-    UNIQUE (name, sport, birth_date)
+    debut_season  INTEGER
+);
+
+-- Source-specific player IDs (nba stats PERSON_ID, nflverse gsis_id, ...). Identity across
+-- sources goes through this table, never through name matching.
+CREATE TABLE IF NOT EXISTS player_external_ids (
+    player_id     INTEGER NOT NULL REFERENCES players(id),
+    source        TEXT NOT NULL,
+    external_id   TEXT NOT NULL,
+    PRIMARY KEY (source, external_id)
 );
 
 CREATE TABLE IF NOT EXISTS cards (
@@ -98,3 +105,15 @@ CREATE TABLE IF NOT EXISTS watchlist (
     added_at      TEXT NOT NULL,
     notes         TEXT
 );
+
+-- One row per ingestion run, so a silently broken source shows up as a status or row-count drop.
+CREATE TABLE IF NOT EXISTS source_runs (
+    id            INTEGER PRIMARY KEY,
+    source        TEXT NOT NULL,
+    started_at    TEXT NOT NULL,
+    finished_at   TEXT,
+    status        TEXT NOT NULL,          -- 'running', 'ok', 'suspect', 'blocked', 'error'
+    rows_written  INTEGER NOT NULL DEFAULT 0,
+    detail        TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_runs_source ON source_runs (source, started_at);

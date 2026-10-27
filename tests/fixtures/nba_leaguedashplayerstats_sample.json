@@ -1,0 +1,5 @@
+{"resource": "leaguedashplayerstats",
+ "resultSets": [{"name": "LeagueDashPlayerStats",
+  "headers": ["PLAYER_ID", "PLAYER_NAME", "TEAM_ABBREVIATION", "GP", "MIN", "PTS", "REB", "AST", "STL", "BLK", "TOV", "FG_PCT", "FG3_PCT", "FT_PCT", "PLUS_MINUS", "NBA_FANTASY_PTS"],
+  "rowSet": [[1629029, "Luka Doncic", "LAL", 70, 36.1, 28.4, 8.2, 7.9, 1.6, 0.4, 3.5, 0.47, 0.37, 0.78, 3.1, 52.0],
+             [1641705, "Victor Wembanyama", "SAS", 65, 33.0, 24.2, 11.0, 3.8, 1.2, 3.6, 3.2, 0.48, 0.35, 0.82, 6.0, 50.1]]}]}

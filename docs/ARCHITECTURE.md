@@ -29,15 +29,29 @@ Answer three questions with data:
 
 Every source implements the same shape: fetch → store the raw payload in `raw_records` → parse into canonical tables. Keeping raw payloads means a parser bug never loses data; fix the parser and replay.
 
+All HTTP goes through `fetcher.Fetcher`: robots.txt checked first, per-host rate limit, retries with backoff on 429/5xx (honoring `Retry-After`), and an immediate `BlockedError` on 403 or a bot challenge — never retried or worked around. Every run is wrapped in `runs.track_run`, which records status and row count in `source_runs` and marks a run `suspect` when it writes nothing or less than half of the previous good run (the usual symptom of a source changing format). `cardtracker runs` exits non-zero when anything is unhealthy, so a scheduler can alert on it.
+
+Sports in scope: **basketball and football**.
+
 | Source | Data | Access | Status |
 |---|---|---|---|
 | PSA Public API | Cert lookup, spec population | Free token, low daily limit | Client stubbed |
 | eBay Browse API | Active listings (asking prices, supply) | Free developer key, OAuth client-credentials | Client stubbed |
-| SportsCardsPro / PriceCharting | Sold prices by card + grade | Paid API | Not started |
+| SportsCardsPro / PriceCharting | Sold prices by card + grade | Paid API (site is behind Cloudflare) | Not started |
 | eBay Marketplace Insights | Sold items, last 90 days | Restricted — apply | Not started |
-| Player stats (e.g. `nba_api`, `pybaseball`) | Performance per season/game | Free | Not started |
+| nflverse | NFL season stats (QB/RB/WR/TE) | Free, open release CSVs | **Working** |
+| stats.nba.com | NBA season stats | Free; unreachable from cloud IPs — run from home | Working (untested live) |
 
 Rule: only sources whose terms permit automated access. A pipeline built on a source that can switch us off leaves unrecoverable gaps in history.
+
+Sources checked and ruled out (Oct 2026):
+
+| Source | Why not |
+|---|---|
+| 130point, SportsCardsPro site, PSA pop pages, Card Ladder | Cloudflare bot challenge (403) |
+| eBay sold search pages, Heritage (ha.com) | 403 to automated requests |
+| Goldin | Pages are client-rendered; data comes only from `/api/`, which robots.txt disallows |
+| Fanatics Collect | Terms of use §3.5 and §11.3.8 explicitly prohibit scraping |
 
 ### 2. Canonical store (`src/cardtracker/schema.sql`)
 
@@ -71,10 +85,11 @@ Second signal — **forward performance thesis**: your own projection of player 
 
 ## Roadmap
 
-1. Schema + DB init + CLI ✅ (this commit)
-2. PSA pop snapshots for a watchlist of cards
-3. eBay Browse daily collector for the watchlist (supply + asking prices)
-4. Sold-price source (SportsCardsPro API) — the bulk history
-5. Player stats ingestion for one sport
-6. Title → card matcher
-7. Price index + residual signal + backtest harness with costs
+1. Schema + DB init + CLI ✅
+2. Robust fetcher + run health tracking ✅
+3. Player stats: NFL (nflverse) ✅, NBA (stats.nba.com) ✅
+4. PSA pop snapshots for a watchlist of cards
+5. eBay Browse daily collector for the watchlist (supply + asking prices)
+6. Sold-price source (SportsCardsPro API) — the bulk history
+7. Title → card matcher
+8. Price index + residual signal + backtest harness with costs
