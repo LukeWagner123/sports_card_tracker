@@ -1,0 +1,80 @@
+# Architecture
+
+## Goal
+
+Answer three questions with data:
+
+1. **Comparison** — how do card prices compare across players, sets, parallels, and grades?
+2. **Mispricing** — given a player's performance and a card's supply, is the card cheap or expensive relative to peers?
+3. **Alpha** — can we buy cards of players we expect to improve *before* the market reprices them, by enough to beat transaction costs?
+
+## Layers
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │ 4. Signals / research   valuation residuals, momentum, backtests │
+ ├──────────────────────────────────────────────────────────────────┤
+ │ 3. Analytics            price index per card/player, pop-adjusted│
+ │                         scarcity, performance scores             │
+ ├──────────────────────────────────────────────────────────────────┤
+ │ 2. Canonical store      players, cards, sales, listings,         │
+ │    (SQLite → Postgres)  pop_snapshots, player_stats              │
+ ├──────────────────────────────────────────────────────────────────┤
+ │ 1. Ingestion            one module per source; raw payloads kept │
+ │                         in raw_records so parsing can be re-run  │
+ └──────────────────────────────────────────────────────────────────┘
+```
+
+### 1. Ingestion (`src/cardtracker/ingest/`)
+
+Every source implements the same shape: fetch → store the raw payload in `raw_records` → parse into canonical tables. Keeping raw payloads means a parser bug never loses data; fix the parser and replay.
+
+| Source | Data | Access | Status |
+|---|---|---|---|
+| PSA Public API | Cert lookup, spec population | Free token, low daily limit | Client stubbed |
+| eBay Browse API | Active listings (asking prices, supply) | Free developer key, OAuth client-credentials | Client stubbed |
+| SportsCardsPro / PriceCharting | Sold prices by card + grade | Paid API | Not started |
+| eBay Marketplace Insights | Sold items, last 90 days | Restricted — apply | Not started |
+| Player stats (e.g. `nba_api`, `pybaseball`) | Performance per season/game | Free | Not started |
+
+Rule: only sources whose terms permit automated access. A pipeline built on a source that can switch us off leaves unrecoverable gaps in history.
+
+### 2. Canonical store (`src/cardtracker/schema.sql`)
+
+The hard problem is **identity**: mapping a messy listing title ("Luka Prizm Silver RC PSA 10") to one canonical card. The schema separates:
+
+- `players` — one row per athlete.
+- `cards` — one row per distinct printed card (year, set, number, parallel, print run). Grade is *not* part of a card.
+- `sales` / `listings` — one row per transaction / active listing, pointing to a `card_id` + `grader` + `grade`. `card_id` may be NULL until matched; `raw_title` is always kept.
+- `pop_snapshots` — dated population counts per card/grader/grade. Snapshots, not overwrites, so pop growth over time is measurable.
+- `player_stats` — dated performance metrics, generic (`metric`, `value`) so any sport fits.
+
+Start on SQLite (zero setup). Move to Postgres when concurrent writers or data volume require it; the SQL is kept portable.
+
+### 3. Analytics (`src/cardtracker/analytics/`)
+
+- **Price index** (`index.py`): robust (median) price per card+grade per time bucket, then a player index as a weighted basket of their key cards. Medians, because single sales are noisy and shill/best-offer outliers are common.
+- **Scarcity**: price vs. population — a PSA 10 with pop 50 and pop 5,000 are different assets.
+- **Performance score**: per-player standardized score from `player_stats` relative to peers (same sport, position, experience).
+
+### 4. Signals (`src/cardtracker/analytics/valuation.py`)
+
+First signal — **cross-sectional residual**: regress log(card price) on performance score (and later scarcity, age, market size) across comparable players. A large negative residual means "cheap for how good the player is"; positive means "priced on hype."
+
+Second signal — **forward performance thesis**: your own projection of player improvement vs. what current prices imply. This is where alpha would come from, and it needs a backtest harness before money goes in.
+
+### Reality checks built into the design
+
+- **Transaction costs**: eBay final value fees (~13%), shipping, grading fees, and bid-ask spread mean a position needs roughly 20–30% appreciation to break even. Every backtest must net these out.
+- **No backtest without history**: sold-price history is the bottleneck. Start collecting daily now; history not captured cannot be recovered later.
+- **Liquidity**: thinly traded cards have stale prices; the index must carry a sales-count / confidence field.
+
+## Roadmap
+
+1. Schema + DB init + CLI ✅ (this commit)
+2. PSA pop snapshots for a watchlist of cards
+3. eBay Browse daily collector for the watchlist (supply + asking prices)
+4. Sold-price source (SportsCardsPro API) — the bulk history
+5. Player stats ingestion for one sport
+6. Title → card matcher
+7. Price index + residual signal + backtest harness with costs
