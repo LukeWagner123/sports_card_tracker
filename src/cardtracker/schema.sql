@@ -134,3 +134,26 @@ CREATE TABLE IF NOT EXISTS season_events (
     source        TEXT NOT NULL,
     PRIMARY KEY (league, season, event)
 );
+
+-- Source-specific card IDs (sportscardspro product id, PSA spec id, ...).
+CREATE TABLE IF NOT EXISTS card_external_ids (
+    card_id       INTEGER NOT NULL REFERENCES cards(id),
+    source        TEXT NOT NULL,
+    external_id   TEXT NOT NULL,
+    PRIMARY KEY (source, external_id),
+    UNIQUE (card_id, source)
+);
+
+-- Point-in-time price-guide values (not individual sales). One row per card/grade/day/source;
+-- daily snapshots become a price history going forward.
+CREATE TABLE IF NOT EXISTS price_snapshots (
+    card_id       INTEGER NOT NULL REFERENCES cards(id),
+    grader        TEXT NOT NULL,          -- 'RAW', 'ANY' (any grading company), 'PSA', 'BGS', ...
+    grade         REAL,                   -- NULL for RAW
+    price_usd     REAL NOT NULL,
+    sales_volume  INTEGER,                -- source's yearly units sold, all grades
+    snapshot_date TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    UNIQUE (card_id, grader, grade, snapshot_date, source)
+);
+CREATE INDEX IF NOT EXISTS ix_snapshots_card ON price_snapshots (card_id, grader, grade, snapshot_date);

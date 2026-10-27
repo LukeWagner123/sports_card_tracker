@@ -24,11 +24,11 @@ import requests
 from cardtracker.db import store_raw
 from cardtracker.ingest.ebay_browse import (EbayBrowseClient, auction_observation, parse_grade,
                                             title_matches)
+from cardtracker.names import last_name
 from cardtracker.runs import track_run
 
 SOURCE = "ebay_browse"
 SALE_SOURCE = "ebay_auction_observed"
-NAME_SUFFIXES = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv"}
 DAILY_CALL_BUDGET = 4500          # of the default 5,000; leaves headroom for manual use
 RAW_RETENTION_DAYS = 7
 
@@ -46,9 +46,7 @@ def calls_today(conn: sqlite3.Connection, now: datetime) -> int:
 
 
 def _required_terms(card: sqlite3.Row) -> list[str]:
-    parts = [p for p in card["player_name"].split() if p.lower() not in NAME_SUFFIXES]
-    last_name = parts[-1]
-    return [last_name, card["card_number"].lstrip("#")]
+    return [last_name(card["player_name"]), card["card_number"].lstrip("#")]
 
 
 def _record(conn: sqlite3.Connection, card: sqlite3.Row, obs: dict, observed_at: str) -> bool:

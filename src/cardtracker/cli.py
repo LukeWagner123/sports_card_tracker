@@ -123,6 +123,25 @@ def cmd_season_report(args) -> None:
     _print_summaries("Month vs. that year's median", sz.month_of_year(conn, league, **kw))
 
 
+def cmd_scp(args) -> None:
+    from cardtracker.ingest import sportscardspro as scp
+
+    conn = open_db()
+    if args.action == "purge":
+        if not args.yes:
+            sys.exit("this deletes all SportsCardsPro data; re-run with --yes")
+        print(scp.purge(conn))
+        return
+    client = scp.SportsCardsProClient()
+    if args.action == "link":
+        linked, unmatched = scp.link_watchlist(conn, client)
+        print(f"linked {linked} cards")
+        for q in unmatched:
+            print(f"  no unambiguous match: {q}")
+    else:
+        print(f"wrote {scp.snapshot(conn, client)} price rows")
+
+
 def main(argv: list[str] | None = None) -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(prog="cardtracker")
@@ -147,6 +166,14 @@ def main(argv: list[str] | None = None) -> None:
 
     ebay = sub.add_parser("ebay", help="eBay Browse API collection").add_subparsers(dest="action", required=True)
     ebay.add_parser("poll", help="observe watchlist auctions; run every ~10 minutes").set_defaults(func=cmd_ebay_poll)
+
+    scp = sub.add_parser("scp", help="SportsCardsPro price guide (current values)").add_subparsers(
+        dest="action", required=True)
+    scp.add_parser("link", help="match watchlist cards to SportsCardsPro products").set_defaults(func=cmd_scp)
+    scp.add_parser("snapshot", help="record today's values for linked cards (run daily)").set_defaults(func=cmd_scp)
+    purge = scp.add_parser("purge", help="delete all SportsCardsPro data (required when you cancel)")
+    purge.add_argument("--yes", action="store_true")
+    purge.set_defaults(func=cmd_scp)
 
     cal = sub.add_parser("calendar", help="league season dates").add_subparsers(dest="action", required=True)
     fetch = cal.add_parser("fetch", help="fetch season dates (NFL: nflverse; NBA: stats.nba.com, run from home)")

@@ -37,7 +37,7 @@ Sports in scope: **basketball and football**.
 |---|---|---|---|
 | PSA Public API | Cert lookup, spec population | Free token, low daily limit | Client stubbed |
 | eBay Browse API | Active auctions observed to their end → observed sale prices (lower bound) | Free developer key, 5,000 calls/day | **Built** (needs keys) |
-| SportsCardsPro / PriceCharting | **Current** values by card + grade only | Paid API. Docs: "Historic prices and historic sales are not supported"; data must be purged when the subscription ends | Ruled out for history |
+| SportsCardsPro / PriceCharting | **Current** values by card + grade, yearly sales volume | Paid API ($50/mo). No history ("Historic prices and historic sales are not supported"); data must be purged when the subscription ends | **Working**: daily snapshots |
 | nflverse schedules | NFL season dates 1999– (regular season, each playoff round, Super Bowl) | Free | **Working** |
 | Historical sales CSV | Any history obtained elsewhere | `cardtracker prices import` | **Built** |
 | eBay Marketplace Insights | Sold items, last 90 days | Restricted — apply | Not started |

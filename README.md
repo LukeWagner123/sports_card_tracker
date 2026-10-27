@@ -20,6 +20,19 @@ cardtracker stats nba 2025     # NBA 2025-26 stats (run from a home connection)
 cardtracker runs               # recent ingestion runs; exits 1 if any are unhealthy
 ```
 
+## SportsCardsPro price guide
+
+Current values per card by grade (raw, 7–9.5 any grader, PSA/BGS/SGC/CGC 10) plus yearly sales
+volume. The API has **no history**; running `snapshot` daily builds a series going forward.
+Their terms require deleting all of it when the subscription ends (`scp purge --yes`), and the
+data is licensed for internal use only.
+
+```bash
+cardtracker scp link        # match watchlist cards to SportsCardsPro products
+cardtracker scp snapshot    # today's values for linked cards (schedule daily)
+cardtracker scp purge --yes # required if you cancel
+```
+
 ## Seasonality analysis
 
 How card prices move through the league calendar: season start, mid-season, the playoff run,
