@@ -1,0 +1,133 @@
+"""Seasonal price behavior: how card prices move through a league's calendar.
+
+Three views, all built from the `sales` table for cards of one league's players:
+
+- phase_returns:   log return from the start to the end of each phase (early/mid/late season,
+                   playoffs, offseason), aggregated across cards and seasons.
+- event_study:     average price path in the weeks around an event (e.g. playoffs_start),
+                   relative to the price at the event.
+- month_of_year:   each month's median price relative to that card's median for the year.
+
+Prices are noisy and sparse, so a "price level" at a date is the median of sales within
+± window_days, and requires min_sales of them. Returns are log returns (symmetric, additive).
+Market-wide booms and crashes hit every card at once; check per-season breakdowns before
+trusting a pooled number driven by one year.
+"""
+
+import math
+import sqlite3
+from bisect import bisect_left, bisect_right
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import date, timedelta
+from statistics import mean, median
+
+from cardtracker.calendar import PHASES, SPORT_LEAGUE, events, phases
+
+Series = list[tuple[date, float]]          # sorted (sale date, price)
+
+
+@dataclass
+class Summary:
+    key: str
+    n: int
+    median: float
+    mean: float
+    hit_rate: float                        # share of observations > 0
+    by_season: dict[int, float]            # median per season
+
+    @property
+    def median_pct(self) -> float:
+        return math.expm1(self.median) * 100
+
+
+def load_series(conn: sqlite3.Connection, league: str, grader: str | None = None,
+                grade: float | None = None) -> dict[tuple, Series]:
+    """Sales for one league's cards, grouped by (card_id, grader, grade)."""
+    sport = {v: k for k, v in SPORT_LEAGUE.items()}[league]
+    sql = ("SELECT s.card_id, s.grader, s.grade, substr(s.sold_at, 1, 10) AS d, s.price_usd "
+           "FROM sales s JOIN cards c ON c.id = s.card_id JOIN players p ON p.id = c.player_id "
+           "WHERE p.sport = ? AND s.price_usd > 0")
+    params: list = [sport]
+    if grader:
+        sql += " AND s.grader = ?"
+        params.append(grader)
+    if grade is not None:
+        sql += " AND s.grade = ?"
+        params.append(grade)
+    series: dict[tuple, Series] = defaultdict(list)
+    for r in conn.execute(sql + " ORDER BY d", params):
+        series[(r["card_id"], r["grader"], r["grade"])].append((date.fromisoformat(r["d"]), r["price_usd"]))
+    return series
+
+
+def level_at(series: Series, when: date, window_days: int = 14, min_sales: int = 2) -> float | None:
+    """Median price of sales within ± window_days of `when`, or None if too few."""
+    dates = [d for d, _ in series]
+    lo = bisect_left(dates, when - timedelta(days=window_days))
+    hi = bisect_right(dates, when + timedelta(days=window_days))
+    prices = [p for _, p in series[lo:hi]]
+    return median(prices) if len(prices) >= min_sales else None
+
+
+def _summarize(key: str, obs: list[tuple[int, float]]) -> Summary | None:
+    if not obs:
+        return None
+    vals = [v for _, v in obs]
+    seasons: dict[int, list[float]] = defaultdict(list)
+    for s, v in obs:
+        seasons[s].append(v)
+    return Summary(key, len(vals), median(vals), mean(vals),
+                   sum(v > 0 for v in vals) / len(vals),
+                   {s: median(v) for s, v in sorted(seasons.items())})
+
+
+def phase_returns(conn: sqlite3.Connection, league: str, grader: str | None = None,
+                  grade: float | None = None, window_days: int = 14, min_sales: int = 2) -> list[Summary]:
+    series = load_series(conn, league, grader, grade)
+    obs: dict[str, list[tuple[int, float]]] = defaultdict(list)
+    for ph in phases(conn, league):
+        for s in series.values():
+            a = level_at(s, ph.start, window_days, min_sales)
+            b = level_at(s, ph.end, window_days, min_sales)
+            if a and b:
+                obs[ph.name].append((ph.season, math.log(b / a)))
+    return [summ for name in PHASES if (summ := _summarize(name, obs[name]))]
+
+
+def event_study(conn: sqlite3.Connection, league: str, event: str, weeks_before: int = 8,
+                weeks_after: int = 12, grader: str | None = None, grade: float | None = None,
+                window_days: int = 7, min_sales: int = 2) -> list[Summary]:
+    """Average log price relative to the event date, at each weekly offset."""
+    series = load_series(conn, league, grader, grade)
+    obs: dict[int, list[tuple[int, float]]] = defaultdict(list)
+    for season, ev in events(conn, league).items():
+        if event not in ev:
+            continue
+        for s in series.values():
+            base = level_at(s, ev[event], window_days, min_sales)
+            if not base:
+                continue
+            for w in range(-weeks_before, weeks_after + 1):
+                lvl = level_at(s, ev[event] + timedelta(weeks=w), window_days, min_sales)
+                if lvl:
+                    obs[w].append((season, math.log(lvl / base)))
+    return [summ for w in sorted(obs) if (summ := _summarize(f"{w:+d}w", obs[w]))]
+
+
+def month_of_year(conn: sqlite3.Connection, league: str, grader: str | None = None,
+                  grade: float | None = None, min_sales: int = 2) -> list[Summary]:
+    """Each calendar month's median price vs. the same card's median for that year."""
+    series = load_series(conn, league, grader, grade)
+    obs: dict[int, list[tuple[int, float]]] = defaultdict(list)
+    for s in series.values():
+        by_year: dict[int, list[float]] = defaultdict(list)
+        by_month: dict[tuple[int, int], list[float]] = defaultdict(list)
+        for d, p in s:
+            by_year[d.year].append(p)
+            by_month[(d.year, d.month)].append(p)
+        for (year, month), prices in by_month.items():
+            if len(prices) >= min_sales and len(by_year[year]) >= 6 * min_sales:
+                obs[month].append((year, math.log(median(prices) / median(by_year[year]))))
+    names = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+    return [summ for m in range(1, 13) if (summ := _summarize(names[m - 1], obs[m]))]

@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import sys
 from pathlib import Path
@@ -74,6 +75,54 @@ def cmd_ebay_poll(args) -> None:
     print(" ".join(f"{k}={v}" for k, v in result.items()))
 
 
+def cmd_calendar(args) -> None:
+    from cardtracker import calendar
+
+    conn = open_db()
+    if args.league == "nfl":
+        n = calendar.ingest_nfl(conn)
+    else:
+        n = calendar.ingest_nba(conn, args.first, args.last)
+    print(f"{args.league}: wrote {n} season events")
+
+
+def cmd_calendar_import(args) -> None:
+    from cardtracker import calendar
+
+    print(f"imported {calendar.import_csv(open_db(), args.csv)} season events")
+
+
+def cmd_prices_import(args) -> None:
+    from cardtracker.prices import import_csv
+
+    imported, missing = import_csv(open_db(), args.csv)
+    print(f"imported {imported} sales")
+    for m in sorted(set(missing)):
+        print(f"  no matching card (add it to a watchlist first): {m}")
+
+
+def _print_summaries(title: str, rows) -> None:
+    print(f"\n{title}")
+    if not rows:
+        print("  (not enough data)")
+        return
+    print(f"  {'':<14}{'median':>9}{'hit rate':>10}{'n':>7}   median by season")
+    for r in rows:
+        seasons = "  ".join(f"{s}:{math.expm1(v) * 100:+.0f}%" for s, v in r.by_season.items())
+        print(f"  {r.key:<14}{r.median_pct:>+8.1f}%{r.hit_rate * 100:>9.0f}%{r.n:>7}   {seasons}")
+
+
+def cmd_season_report(args) -> None:
+    from cardtracker.analytics import seasonality as sz
+
+    conn = open_db()
+    league, kw = args.league.upper(), {"grader": args.grader, "grade": args.grade}
+    print(f"{league} seasonality ({args.grader or 'all graders'} {args.grade or ''})".rstrip())
+    _print_summaries("Return over each phase", sz.phase_returns(conn, league, **kw))
+    _print_summaries(f"Price vs. {args.event} date", sz.event_study(conn, league, args.event, **kw))
+    _print_summaries("Month vs. that year's median", sz.month_of_year(conn, league, **kw))
+
+
 def main(argv: list[str] | None = None) -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(prog="cardtracker")
@@ -98,6 +147,29 @@ def main(argv: list[str] | None = None) -> None:
 
     ebay = sub.add_parser("ebay", help="eBay Browse API collection").add_subparsers(dest="action", required=True)
     ebay.add_parser("poll", help="observe watchlist auctions; run every ~10 minutes").set_defaults(func=cmd_ebay_poll)
+
+    cal = sub.add_parser("calendar", help="league season dates").add_subparsers(dest="action", required=True)
+    fetch = cal.add_parser("fetch", help="fetch season dates (NFL: nflverse; NBA: stats.nba.com, run from home)")
+    fetch.add_argument("league", choices=["nfl", "nba"])
+    fetch.add_argument("--first", type=int, default=2015, help="NBA only: first season")
+    fetch.add_argument("--last", type=int, default=2025, help="NBA only: last season")
+    fetch.set_defaults(func=cmd_calendar)
+    cimp = cal.add_parser("import", help="load season events (draft, trade deadline, ...) from CSV")
+    cimp.add_argument("csv")
+    cimp.set_defaults(func=cmd_calendar_import)
+
+    prices = sub.add_parser("prices", help="historical sales").add_subparsers(dest="action", required=True)
+    pimp = prices.add_parser("import", help="load historical sales from CSV")
+    pimp.add_argument("csv")
+    pimp.set_defaults(func=cmd_prices_import)
+
+    season = sub.add_parser("season", help="seasonality analysis").add_subparsers(dest="action", required=True)
+    rep = season.add_parser("report", help="phase returns, event study, month-of-year")
+    rep.add_argument("league", choices=["nfl", "nba"])
+    rep.add_argument("--grader", help="e.g. PSA")
+    rep.add_argument("--grade", type=float, help="e.g. 10")
+    rep.add_argument("--event", default="playoffs_start")
+    rep.set_defaults(func=cmd_season_report)
 
     args = parser.parse_args(argv)
     args.func(args)

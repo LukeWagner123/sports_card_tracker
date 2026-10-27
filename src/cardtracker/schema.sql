@@ -123,3 +123,14 @@ CREATE TABLE IF NOT EXISTS source_runs (
     detail        TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_runs_source ON source_runs (source, started_at);
+
+-- Key dates per league season (season_start, playoffs_start, championship, ...). Seasons are keyed
+-- by the year they start. Phases (offseason, early/mid/late season, playoffs) derive from these.
+CREATE TABLE IF NOT EXISTS season_events (
+    league        TEXT NOT NULL,          -- 'NFL', 'NBA'
+    season        INTEGER NOT NULL,
+    event         TEXT NOT NULL,
+    date          TEXT NOT NULL,
+    source        TEXT NOT NULL,
+    PRIMARY KEY (league, season, event)
+);

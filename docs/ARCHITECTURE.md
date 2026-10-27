@@ -37,7 +37,9 @@ Sports in scope: **basketball and football**.
 |---|---|---|---|
 | PSA Public API | Cert lookup, spec population | Free token, low daily limit | Client stubbed |
 | eBay Browse API | Active auctions observed to their end → observed sale prices (lower bound) | Free developer key, 5,000 calls/day | **Built** (needs keys) |
-| SportsCardsPro / PriceCharting | Sold prices by card + grade | Paid API (site is behind Cloudflare) | Not started |
+| SportsCardsPro / PriceCharting | **Current** values by card + grade only | Paid API. Docs: "Historic prices and historic sales are not supported"; data must be purged when the subscription ends | Ruled out for history |
+| nflverse schedules | NFL season dates 1999– (regular season, each playoff round, Super Bowl) | Free | **Working** |
+| Historical sales CSV | Any history obtained elsewhere | `cardtracker prices import` | **Built** |
 | eBay Marketplace Insights | Sold items, last 90 days | Restricted — apply | Not started |
 | nflverse | NFL season stats (QB/RB/WR/TE) | Free, open release CSVs | **Working** |
 | stats.nba.com | NBA season stats | Free; unreachable from cloud IPs — run from home | Working (untested live) |
@@ -90,6 +92,7 @@ Second signal — **forward performance thesis**: your own projection of player 
 3. Player stats: NFL (nflverse) ✅, NBA (stats.nba.com) ✅
 4. PSA pop snapshots for a watchlist of cards
 5. eBay auction tracker for the watchlist ✅ (needs keys + an always-on scheduler)
-6. Sold-price source (SportsCardsPro API) — the bulk history
-7. Title → card matcher
-8. Price index + residual signal + backtest harness with costs
+6. Season calendars (NFL from nflverse, NBA from stats.nba.com) + seasonality analysis ✅
+7. Historical sold-price source — open question; PriceCharting/SportsCardsPro has no history
+8. Title → card matcher
+9. Price index + residual signal + backtest harness with costs

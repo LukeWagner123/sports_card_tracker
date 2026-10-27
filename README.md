@@ -20,6 +20,28 @@ cardtracker stats nba 2025     # NBA 2025-26 stats (run from a home connection)
 cardtracker runs               # recent ingestion runs; exits 1 if any are unhealthy
 ```
 
+## Seasonality analysis
+
+How card prices move through the league calendar: season start, mid-season, the playoff run,
+and the offseason.
+
+```bash
+cardtracker calendar fetch nfl                 # NFL season dates 1999-present (nflverse schedules)
+cardtracker calendar fetch nba --first 2015    # NBA dates from stats.nba.com (run from home)
+cardtracker calendar import my_events.csv      # extra events: league,season,event,date,source
+cardtracker prices import history.csv          # historical sales (see src/cardtracker/prices.py)
+cardtracker season report nfl --grader PSA --grade 10 --event playoffs_start
+```
+
+The report shows, pooled across cards and seasons with a per-season breakdown:
+- **Return over each phase**: early/mid/late season, playoffs, offseason.
+- **Event study**: average price path in the weeks around an event, relative to the event date.
+- **Month of year**: each month vs. that card's median for the year.
+
+It needs multi-year price history to say anything; one season is an anecdote. Market-wide
+booms and crashes (e.g. 2021-22) affect every card at once, so check the per-season columns
+before trusting a pooled number.
+
 ## eBay auction tracking
 
 Builds sold-price history for free from the eBay Browse API (5,000 calls/day) by watching
