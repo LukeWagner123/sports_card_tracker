@@ -116,8 +116,10 @@ def cmd_season_report(args) -> None:
     from cardtracker.analytics import seasonality as sz
 
     conn = open_db()
-    league, kw = args.league.upper(), {"grader": args.grader, "grade": args.grade}
-    print(f"{league} seasonality ({args.grader or 'all graders'} {args.grade or ''})".rstrip())
+    league = args.league.upper()
+    kw = {"grader": args.grader, "grade": args.grade, "data": args.data}
+    label = "player indexes" if args.data == "player_index" else f"{args.grader or 'all graders'} {args.grade or ''}"
+    print(f"{league} seasonality from {args.data} ({label.strip()})")
     _print_summaries("Return over each phase", sz.phase_returns(conn, league, **kw))
     _print_summaries(f"Price vs. {args.event} date", sz.event_study(conn, league, args.event, **kw))
     _print_summaries("Month vs. that year's median", sz.month_of_year(conn, league, **kw))
@@ -140,6 +142,29 @@ def cmd_scp(args) -> None:
             print(f"  no unambiguous match: {q}")
     else:
         print(f"wrote {scp.snapshot(conn, client)} price rows")
+
+
+def cmd_ch(args) -> None:
+    from cardtracker.ingest import cardhedge as ch
+
+    conn = open_db()
+    client = ch.CardHedgeClient()
+    if args.action == "link":
+        linked, unmatched = ch.link_cards(conn, client)
+        print(f"linked {linked} cards")
+        for q in unmatched:
+            print(f"  no unambiguous match: {q}")
+    elif args.action == "history":
+        grades = [g.strip() for g in args.grades.split(",")] if args.grades else None
+        result = ch.fetch_price_history(conn, client, grades, max_calls=args.max_calls)
+        print(" ".join(f"{k}={v}" for k, v in result.items()))
+        if not result["complete"]:
+            print("stopped at --max-calls; re-run to continue (finished windows are skipped)")
+    elif args.action == "players":
+        for sport in ("basketball", "football"):
+            linked, unmatched = ch.link_players(conn, client, sport)
+            print(f"{sport}: linked {linked} players" + (f"; unmatched: {', '.join(unmatched)}" if unmatched else ""))
+        print(f"wrote {ch.fetch_player_index(conn, client)} player index points ({client.calls} calls)")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -175,6 +200,14 @@ def main(argv: list[str] | None = None) -> None:
     purge.add_argument("--yes", action="store_true")
     purge.set_defaults(func=cmd_scp)
 
+    chp = sub.add_parser("ch", help="Card Hedge price history").add_subparsers(dest="action", required=True)
+    chp.add_parser("link", help="match watchlist cards to Card Hedge cards").set_defaults(func=cmd_ch)
+    hist = chp.add_parser("history", help="daily price history for linked cards, back to ~2020")
+    hist.add_argument("--grades", help='comma-separated, default "PSA 10,PSA 9,Raw"')
+    hist.add_argument("--max-calls", type=int, default=4500, help="stop after this many API calls")
+    hist.set_defaults(func=cmd_ch)
+    chp.add_parser("players", help="link watchlist players and fetch player index history").set_defaults(func=cmd_ch)
+
     cal = sub.add_parser("calendar", help="league season dates").add_subparsers(dest="action", required=True)
     fetch = cal.add_parser("fetch", help="fetch season dates (NFL: nflverse; NBA: stats.nba.com, run from home)")
     fetch.add_argument("league", choices=["nfl", "nba"])
@@ -196,6 +229,8 @@ def main(argv: list[str] | None = None) -> None:
     rep.add_argument("--grader", help="e.g. PSA")
     rep.add_argument("--grade", type=float, help="e.g. 10")
     rep.add_argument("--event", default="playoffs_start")
+    rep.add_argument("--data", default="sales", choices=["sales", "snapshots", "player_index"],
+                     help="sales, daily price-guide values (e.g. Card Hedge history), or player indexes")
     rep.set_defaults(func=cmd_season_report)
 
     args = parser.parse_args(argv)

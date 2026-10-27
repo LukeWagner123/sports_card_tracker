@@ -20,6 +20,25 @@ cardtracker stats nba 2025     # NBA 2025-26 stats (run from a home connection)
 cardtracker runs               # recent ingestion runs; exits 1 if any are unhealthy
 ```
 
+## Card Hedge price history (the historical data source)
+
+Daily prices per card and grade back to about spring 2020, plus player index history.
+Put `CARDHEDGE_API_KEY` (and your tier's `CARDHEDGE_REQUESTS_PER_MINUTE`) in `.env`.
+
+```bash
+cardtracker ch link                          # match watchlist cards to Card Hedge cards
+cardtracker ch history                       # page each card's history back to its start
+cardtracker ch players                       # player index history for watchlist players
+cardtracker season report nba --data snapshots --grader PSA --grade 10
+cardtracker season report nfl --data player_index
+```
+
+`ch history` costs about 7 calls per card per grade (one per calendar year). At the base tier's
+10 requests/minute, 100 cards x 3 grades is ~2,100 calls, about 3.5 hours; it stops at
+`--max-calls` (default 4,500/day) and resumes where it left off. Finished years are never
+re-fetched; re-running daily only refreshes the current year. Prices are Card Hedge's daily
+computed values, not individual sales.
+
 ## SportsCardsPro price guide
 
 Current values per card by grade (raw, 7–9.5 any grader, PSA/BGS/SGC/CGC 10) plus yearly sales

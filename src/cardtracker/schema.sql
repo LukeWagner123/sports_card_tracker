@@ -157,3 +157,14 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     UNIQUE (card_id, grader, grade, snapshot_date, source)
 );
 CREATE INDEX IF NOT EXISTS ix_snapshots_card ON price_snapshots (card_id, grader, grade, snapshot_date);
+
+-- Player-level price index over time (e.g. Card Hedge: market-cap-weighted top cards).
+CREATE TABLE IF NOT EXISTS player_index (
+    player_id     INTEGER NOT NULL REFERENCES players(id),
+    date          TEXT NOT NULL,
+    value         REAL NOT NULL,
+    volume_30d    INTEGER,
+    card_count    INTEGER,
+    source        TEXT NOT NULL,
+    PRIMARY KEY (player_id, date, source)
+);

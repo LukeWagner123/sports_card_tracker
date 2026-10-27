@@ -1,6 +1,7 @@
 """Seasonal price behavior: how card prices move through a league's calendar.
 
-Three views, all built from the `sales` table for cards of one league's players:
+Three views, built from one league's price series: individual sales, daily price-guide values
+(price_snapshots), or player indexes (see DATA_SOURCES):
 
 - phase_returns:   log return from the start to the end of each phase (early/mid/late season,
                    playoffs, offseason), aggregated across cards and seasons.
@@ -41,13 +42,33 @@ class Summary:
         return math.expm1(self.median) * 100
 
 
+# Where price series come from: individual sales, daily price-guide values, or player indexes.
+DATA_SOURCES = ("sales", "snapshots", "player_index")
+
+
 def load_series(conn: sqlite3.Connection, league: str, grader: str | None = None,
-                grade: float | None = None) -> dict[tuple, Series]:
-    """Sales for one league's cards, grouped by (card_id, grader, grade)."""
+                grade: float | None = None, data: str = "sales") -> dict[tuple, Series]:
+    """Price series for one league, grouped by (card_id, grader, grade), or (player_id,) for
+    player indexes (grader/grade don't apply to those)."""
     sport = {v: k for k, v in SPORT_LEAGUE.items()}[league]
-    sql = ("SELECT s.card_id, s.grader, s.grade, substr(s.sold_at, 1, 10) AS d, s.price_usd "
-           "FROM sales s JOIN cards c ON c.id = s.card_id JOIN players p ON p.id = c.player_id "
-           "WHERE p.sport = ? AND s.price_usd > 0")
+    series: dict[tuple, Series] = defaultdict(list)
+    if data == "player_index":
+        rows = conn.execute(
+            "SELECT i.player_id, i.date AS d, i.value FROM player_index i "
+            "JOIN players p ON p.id = i.player_id WHERE p.sport = ? AND i.value > 0 ORDER BY d", (sport,))
+        for r in rows:
+            series[(r["player_id"],)].append((date.fromisoformat(r["d"]), r["value"]))
+        return series
+    if data == "snapshots":
+        sql = ("SELECT s.card_id, s.grader, s.grade, s.snapshot_date AS d, s.price_usd "
+               "FROM price_snapshots s JOIN cards c ON c.id = s.card_id JOIN players p ON p.id = c.player_id "
+               "WHERE p.sport = ? AND s.price_usd > 0")
+    elif data == "sales":
+        sql = ("SELECT s.card_id, s.grader, s.grade, substr(s.sold_at, 1, 10) AS d, s.price_usd "
+               "FROM sales s JOIN cards c ON c.id = s.card_id JOIN players p ON p.id = c.player_id "
+               "WHERE p.sport = ? AND s.price_usd > 0")
+    else:
+        raise ValueError(f"data must be one of {DATA_SOURCES}")
     params: list = [sport]
     if grader:
         sql += " AND s.grader = ?"
@@ -55,7 +76,6 @@ def load_series(conn: sqlite3.Connection, league: str, grader: str | None = None
     if grade is not None:
         sql += " AND s.grade = ?"
         params.append(grade)
-    series: dict[tuple, Series] = defaultdict(list)
     for r in conn.execute(sql + " ORDER BY d", params):
         series[(r["card_id"], r["grader"], r["grade"])].append((date.fromisoformat(r["d"]), r["price_usd"]))
     return series
@@ -83,8 +103,9 @@ def _summarize(key: str, obs: list[tuple[int, float]]) -> Summary | None:
 
 
 def phase_returns(conn: sqlite3.Connection, league: str, grader: str | None = None,
-                  grade: float | None = None, window_days: int = 14, min_sales: int = 2) -> list[Summary]:
-    series = load_series(conn, league, grader, grade)
+                  grade: float | None = None, window_days: int = 14, min_sales: int = 2,
+                  data: str = "sales") -> list[Summary]:
+    series = load_series(conn, league, grader, grade, data)
     obs: dict[str, list[tuple[int, float]]] = defaultdict(list)
     for ph in phases(conn, league):
         for s in series.values():
@@ -97,9 +118,9 @@ def phase_returns(conn: sqlite3.Connection, league: str, grader: str | None = No
 
 def event_study(conn: sqlite3.Connection, league: str, event: str, weeks_before: int = 8,
                 weeks_after: int = 12, grader: str | None = None, grade: float | None = None,
-                window_days: int = 7, min_sales: int = 2) -> list[Summary]:
+                window_days: int = 7, min_sales: int = 2, data: str = "sales") -> list[Summary]:
     """Average log price relative to the event date, at each weekly offset."""
-    series = load_series(conn, league, grader, grade)
+    series = load_series(conn, league, grader, grade, data)
     obs: dict[int, list[tuple[int, float]]] = defaultdict(list)
     for season, ev in events(conn, league).items():
         if event not in ev:
@@ -116,9 +137,9 @@ def event_study(conn: sqlite3.Connection, league: str, event: str, weeks_before:
 
 
 def month_of_year(conn: sqlite3.Connection, league: str, grader: str | None = None,
-                  grade: float | None = None, min_sales: int = 2) -> list[Summary]:
+                  grade: float | None = None, min_sales: int = 2, data: str = "sales") -> list[Summary]:
     """Each calendar month's median price vs. the same card's median for that year."""
-    series = load_series(conn, league, grader, grade)
+    series = load_series(conn, league, grader, grade, data)
     obs: dict[int, list[tuple[int, float]]] = defaultdict(list)
     for s in series.values():
         by_year: dict[int, list[float]] = defaultdict(list)

@@ -36,6 +36,9 @@ class FakeSession:
         self.robots = robots
         self.calls = []
 
+    def request(self, method, url, **kwargs):
+        return self.get(url, **kwargs)
+
     def get(self, url, **kwargs):
         if url.endswith("/robots.txt"):
             return FakeResponse(text=self.robots)

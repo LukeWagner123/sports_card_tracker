@@ -60,6 +60,12 @@ class Fetcher:
         self._last_request[host] = time.monotonic()
 
     def get(self, url: str, **kwargs) -> requests.Response:
+        return self.request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs) -> requests.Response:
+        return self.request("POST", url, **kwargs)
+
+    def request(self, method: str, url: str, **kwargs) -> requests.Response:
         if self.check_robots and not self._allowed(url):
             raise DisallowedError(url)
         host = urlsplit(url).netloc
@@ -67,7 +73,7 @@ class Fetcher:
         for attempt in range(self.max_retries + 1):
             self._throttle(host)
             try:
-                resp = self.session.get(url, **kwargs)
+                resp = self.session.request(method, url, **kwargs)
             except requests.RequestException:
                 if attempt == self.max_retries:
                     raise
