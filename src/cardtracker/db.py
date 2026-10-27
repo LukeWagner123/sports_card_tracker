@@ -22,8 +22,23 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS never alters an existing
+# table, so these are applied to older databases. Append only; never edit or reorder.
+ADDED_COLUMNS = [
+    ("sales", "price_lag_s", "INTEGER"),
+    ("listings", "bid_count", "INTEGER"),
+    ("watchlist", "exclude_terms", "TEXT"),
+    ("watchlist", "last_searched", "TEXT"),
+]
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     schema = resources.files("cardtracker").joinpath("schema.sql").read_text()
+    # Add missing columns before the schema script, whose indexes may reference them.
+    for table, column, ddl in ADDED_COLUMNS:
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if existing and column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
     conn.executescript(schema)
     conn.commit()
 

@@ -36,7 +36,7 @@ Sports in scope: **basketball and football**.
 | Source | Data | Access | Status |
 |---|---|---|---|
 | PSA Public API | Cert lookup, spec population | Free token, low daily limit | Client stubbed |
-| eBay Browse API | Active listings (asking prices, supply) | Free developer key, OAuth client-credentials | Client stubbed |
+| eBay Browse API | Active auctions observed to their end → observed sale prices (lower bound) | Free developer key, 5,000 calls/day | **Built** (needs keys) |
 | SportsCardsPro / PriceCharting | Sold prices by card + grade | Paid API (site is behind Cloudflare) | Not started |
 | eBay Marketplace Insights | Sold items, last 90 days | Restricted — apply | Not started |
 | nflverse | NFL season stats (QB/RB/WR/TE) | Free, open release CSVs | **Working** |
@@ -89,7 +89,7 @@ Second signal — **forward performance thesis**: your own projection of player 
 2. Robust fetcher + run health tracking ✅
 3. Player stats: NFL (nflverse) ✅, NBA (stats.nba.com) ✅
 4. PSA pop snapshots for a watchlist of cards
-5. eBay Browse daily collector for the watchlist (supply + asking prices)
+5. eBay auction tracker for the watchlist ✅ (needs keys + an always-on scheduler)
 6. Sold-price source (SportsCardsPro API) — the bulk history
 7. Title → card matcher
 8. Price index + residual signal + backtest harness with costs

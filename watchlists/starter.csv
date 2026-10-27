@@ -1,0 +1,9 @@
+sport,player,year,manufacturer,set_name,card_number,parallel,is_rookie,search_query,exclude_terms,notes
+basketball,Luka Doncic,2018,Panini,Prizm,280,Base,1,2018 Prizm Luka Doncic 280,silver;holo;red;blue;green;orange;purple;gold;mojo;pink;white;black;cracked ice;choice;fast break,
+basketball,Zion Williamson,2019,Panini,Prizm,248,Base,1,2019 Prizm Zion Williamson 248,silver;holo;red;blue;green;orange;purple;gold;mojo;pink;white;black;cracked ice;choice;fast break,verify card number
+basketball,Ja Morant,2019,Panini,Prizm,249,Base,1,2019 Prizm Ja Morant 249,silver;holo;red;blue;green;orange;purple;gold;mojo;pink;white;black;cracked ice;choice;fast break,verify card number
+basketball,Victor Wembanyama,2023,Panini,Prizm,136,Base,1,2023 Prizm Victor Wembanyama 136,silver;holo;red;blue;green;orange;purple;gold;mojo;pink;white;black;cracked ice;choice;fast break,verify card number
+football,Patrick Mahomes,2017,Panini,Prizm,269,Base,1,2017 Prizm Patrick Mahomes 269,silver;holo;red;blue;green;orange;purple;gold;mojo;pink;white;black;camo;choice;no huddle,
+football,Josh Allen,2018,Panini,Prizm,205,Base,1,2018 Prizm Josh Allen 205,silver;holo;red;blue;green;orange;purple;gold;mojo;pink;white;black;camo;choice;no huddle,verify card number
+football,Joe Burrow,2020,Panini,Prizm,307,Base,1,2020 Prizm Joe Burrow 307,silver;holo;red;blue;green;orange;purple;gold;mojo;pink;white;black;camo;choice;no huddle,verify card number
+football,Justin Herbert,2020,Panini,Prizm,325,Base,1,2020 Prizm Justin Herbert 325,silver;holo;red;blue;green;orange;purple;gold;mojo;pink;white;black;camo;choice;no huddle,verify card number

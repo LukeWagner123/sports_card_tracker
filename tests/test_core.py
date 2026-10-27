@@ -57,3 +57,12 @@ def test_fit_residuals_flags_cheap_player():
     assert vals[0].player_id == 4
     assert vals[0].residual < 0 < vals[-1].residual
     assert math.isclose(sum(v.residual for v in vals), 0.0, abs_tol=1e-9)
+
+
+def test_init_db_migrates_old_tables():
+    import sqlite3
+    c = sqlite3.connect(":memory:")
+    c.execute("CREATE TABLE watchlist (card_id INTEGER PRIMARY KEY, search_query TEXT, added_at TEXT NOT NULL, notes TEXT)")
+    init_db(c)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(watchlist)")}
+    assert {"exclude_terms", "last_searched"} <= cols

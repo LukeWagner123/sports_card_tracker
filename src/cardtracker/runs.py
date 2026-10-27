@@ -16,6 +16,7 @@ SUSPECT_RATIO = 0.5
 class Run:
     id: int
     rows_written: int = 0
+    idle: bool = False       # set when the run had nothing to do; skips the health checks
 
 
 def previous_rows(conn: sqlite3.Connection, source: str, before_id: int) -> int | None:
@@ -28,7 +29,9 @@ def previous_rows(conn: sqlite3.Connection, source: str, before_id: int) -> int 
 
 
 @contextmanager
-def track_run(conn: sqlite3.Connection, source: str):
+def track_run(conn: sqlite3.Connection, source: str, compare_previous: bool = True):
+    """Record a run in source_runs. Zero rows is always suspect; with compare_previous, so is a
+    sharp drop from the previous ok run (only meaningful when runs are similar in size)."""
     cur = conn.execute(
         "INSERT INTO source_runs (source, started_at, status) VALUES (?, ?, 'running')",
         (source, now_iso()),
@@ -47,8 +50,10 @@ def track_run(conn: sqlite3.Connection, source: str):
         status, detail = "error", f"{type(e).__name__}: {e}"
         raise
     else:
-        prev = previous_rows(conn, source, run.id)
-        if run.rows_written == 0 or (prev and run.rows_written < prev * SUSPECT_RATIO):
+        prev = previous_rows(conn, source, run.id) if compare_previous else None
+        if run.idle:
+            status = "idle"
+        elif run.rows_written == 0 or (prev and run.rows_written < prev * SUSPECT_RATIO):
             status = "suspect"
             detail = f"wrote {run.rows_written} rows; previous ok run wrote {prev}"
     finally:

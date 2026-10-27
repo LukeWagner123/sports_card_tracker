@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS sales (
     source        TEXT NOT NULL,
     external_id   TEXT,
     raw_title     TEXT,
+    price_lag_s   INTEGER,                -- observed prices only: seconds between last observation and end
     UNIQUE (source, external_id)
 );
 CREATE INDEX IF NOT EXISTS ix_sales_card ON sales (card_id, grader, grade, sold_at);
@@ -67,6 +68,7 @@ CREATE TABLE IF NOT EXISTS listings (
     grade         REAL,
     price_usd     REAL NOT NULL,
     listing_type  TEXT,
+    bid_count     INTEGER,
     observed_at   TEXT NOT NULL,
     ends_at       TEXT,
     source        TEXT NOT NULL,
@@ -74,6 +76,8 @@ CREATE TABLE IF NOT EXISTS listings (
     raw_title     TEXT,
     UNIQUE (source, external_id, observed_at)
 );
+CREATE INDEX IF NOT EXISTS ix_listings_item ON listings (source, external_id, observed_at);
+CREATE INDEX IF NOT EXISTS ix_listings_ends ON listings (ends_at);
 
 -- Dated snapshots, never overwritten, so population growth is measurable.
 CREATE TABLE IF NOT EXISTS pop_snapshots (
@@ -102,6 +106,8 @@ CREATE TABLE IF NOT EXISTS player_stats (
 CREATE TABLE IF NOT EXISTS watchlist (
     card_id       INTEGER PRIMARY KEY REFERENCES cards(id),
     search_query  TEXT,                   -- query used against listing sources
+    exclude_terms TEXT,                   -- ';'-separated title terms that mean a different card
+    last_searched TEXT,
     added_at      TEXT NOT NULL,
     notes         TEXT
 );
@@ -112,7 +118,7 @@ CREATE TABLE IF NOT EXISTS source_runs (
     source        TEXT NOT NULL,
     started_at    TEXT NOT NULL,
     finished_at   TEXT,
-    status        TEXT NOT NULL,          -- 'running', 'ok', 'suspect', 'blocked', 'error'
+    status        TEXT NOT NULL,          -- 'running', 'ok', 'idle', 'suspect', 'blocked', 'error'
     rows_written  INTEGER NOT NULL DEFAULT 0,
     detail        TEXT
 );
