@@ -42,16 +42,29 @@ class Summary:
         return math.expm1(self.median) * 100
 
 
-# Where price series come from: individual sales, daily price-guide values, or player indexes.
-DATA_SOURCES = ("sales", "snapshots", "player_index")
+# Where series come from: individual sales, daily price-guide values, player indexes, or Google
+# Trends search interest (attention, not price).
+DATA_SOURCES = ("sales", "snapshots", "player_index", "trends")
+
+# Trends series are weekly or monthly points, not many sales a day: one point near a date is
+# enough, and the window must reach the nearest monthly point.
+SPARSE_LEVEL = {"window_days": 16, "min_sales": 1}
 
 
 def load_series(conn: sqlite3.Connection, league: str, grader: str | None = None,
                 grade: float | None = None, data: str = "sales") -> dict[tuple, Series]:
-    """Price series for one league, grouped by (card_id, grader, grade), or (player_id,) for
-    player indexes (grader/grade don't apply to those)."""
+    """Series for one league, grouped by (card_id, grader, grade); by (player_id,) for player
+    indexes; by (player_id, batch) for trends, since each Trends download has its own scale.
+    grader/grade apply only to card prices."""
     sport = {v: k for k, v in SPORT_LEAGUE.items()}[league]
     series: dict[tuple, Series] = defaultdict(list)
+    if data == "trends":
+        rows = conn.execute(
+            "SELECT t.player_id, t.batch, t.date AS d, t.value FROM search_interest t "
+            "JOIN players p ON p.id = t.player_id WHERE p.sport = ? AND t.value > 0 ORDER BY d", (sport,))
+        for r in rows:
+            series[(r["player_id"], r["batch"])].append((date.fromisoformat(r["d"]), r["value"]))
+        return series
     if data == "player_index":
         rows = conn.execute(
             "SELECT i.player_id, i.date AS d, i.value FROM player_index i "

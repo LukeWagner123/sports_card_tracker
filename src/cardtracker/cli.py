@@ -118,11 +118,14 @@ def cmd_season_report(args) -> None:
     conn = open_db()
     league = args.league.upper()
     kw = {"grader": args.grader, "grade": args.grade, "data": args.data}
-    label = "player indexes" if args.data == "player_index" else f"{args.grader or 'all graders'} {args.grade or ''}"
+    level = sz.SPARSE_LEVEL if args.data == "trends" else {}
+    labels = {"player_index": "player indexes", "trends": "search interest, not prices"}
+    label = labels.get(args.data, f"{args.grader or 'all graders'} {args.grade or ''}")
     print(f"{league} seasonality from {args.data} ({label.strip()})")
-    _print_summaries("Return over each phase", sz.phase_returns(conn, league, **kw))
-    _print_summaries(f"Price vs. {args.event} date", sz.event_study(conn, league, args.event, **kw))
-    _print_summaries("Month vs. that year's median", sz.month_of_year(conn, league, **kw))
+    _print_summaries("Change over each phase", sz.phase_returns(conn, league, **kw, **level))
+    _print_summaries(f"Level vs. {args.event} date", sz.event_study(conn, league, args.event, **kw, **level))
+    _print_summaries("Month vs. that year's median",
+                     sz.month_of_year(conn, league, **kw, min_sales=level.get("min_sales", 2)))
 
 
 def cmd_scp(args) -> None:
@@ -165,6 +168,17 @@ def cmd_ch(args) -> None:
             linked, unmatched = ch.link_players(conn, client, sport)
             print(f"{sport}: linked {linked} players" + (f"; unmatched: {', '.join(unmatched)}" if unmatched else ""))
         print(f"wrote {ch.fetch_player_index(conn, client)} player index points ({client.calls} calls)")
+
+
+def cmd_trends_import(args) -> None:
+    from cardtracker import trends
+
+    conn = open_db()
+    for path in args.csv:
+        written, unmatched = trends.import_csv(conn, path, args.sport)
+        print(f"{path}: {written} points")
+        for term in unmatched:
+            print(f"  '{term}' is not a known {args.sport} player; stored without a player link")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -223,14 +237,21 @@ def main(argv: list[str] | None = None) -> None:
     pimp.add_argument("csv")
     pimp.set_defaults(func=cmd_prices_import)
 
+    tr = sub.add_parser("trends", help="Google Trends search interest").add_subparsers(dest="action", required=True)
+    trimp = tr.add_parser("import", help="load Google Trends CSV exports (one player per file is best)")
+    trimp.add_argument("csv", nargs="+")
+    trimp.add_argument("--sport", required=True, choices=["basketball", "football"])
+    trimp.set_defaults(func=cmd_trends_import)
+
     season = sub.add_parser("season", help="seasonality analysis").add_subparsers(dest="action", required=True)
     rep = season.add_parser("report", help="phase returns, event study, month-of-year")
     rep.add_argument("league", choices=["nfl", "nba"])
     rep.add_argument("--grader", help="e.g. PSA")
     rep.add_argument("--grade", type=float, help="e.g. 10")
     rep.add_argument("--event", default="playoffs_start")
-    rep.add_argument("--data", default="sales", choices=["sales", "snapshots", "player_index"],
-                     help="sales, daily price-guide values (e.g. Card Hedge history), or player indexes")
+    rep.add_argument("--data", default="sales", choices=["sales", "snapshots", "player_index", "trends"],
+                     help="sales, daily price-guide values (e.g. Card Hedge history), player indexes, "
+                          "or Google Trends search interest")
     rep.set_defaults(func=cmd_season_report)
 
     args = parser.parse_args(argv)

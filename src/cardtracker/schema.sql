@@ -168,3 +168,16 @@ CREATE TABLE IF NOT EXISTS player_index (
     source        TEXT NOT NULL,
     PRIMARY KEY (player_id, date, source)
 );
+
+-- Google Trends search interest. Values are 0-100 relative to the peak *within one download*,
+-- so each downloaded file is its own series (`batch`) and must not be compared or spliced across.
+CREATE TABLE IF NOT EXISTS search_interest (
+    term          TEXT NOT NULL,          -- as it appears in the export, e.g. 'Luka Doncic'
+    player_id     INTEGER REFERENCES players(id),   -- NULL for non-player terms ('sports cards')
+    geo           TEXT NOT NULL,          -- 'United States', 'Worldwide', ...
+    date          TEXT NOT NULL,          -- start of the week/month the value covers
+    value         REAL NOT NULL,
+    batch         TEXT NOT NULL,          -- hash of the source file
+    source        TEXT NOT NULL,
+    PRIMARY KEY (term, geo, batch, date)
+);

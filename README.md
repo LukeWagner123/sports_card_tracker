@@ -20,6 +20,25 @@ cardtracker stats nba 2025     # NBA 2025-26 stats (run from a home connection)
 cardtracker runs               # recent ingestion runs; exits 1 if any are unhealthy
 ```
 
+## Google Trends search interest (free, back to 2004)
+
+Attention, not prices, but with 20 years of history it shows whether interest in a player
+follows the season calendar.
+
+1. Go to https://trends.google.com/trends/explore, enter **one player per search**, pick a
+   region (e.g. United States) and time range, then click the download icon on "Interest over
+   time". Ranges of 5 years or less give weekly data; longer ranges give monthly.
+2. Import (names are matched to players accent-insensitively; unknown terms are kept unlinked):
+
+   ```bash
+   cardtracker trends import luka_2021-2026.csv wemby.csv --sport basketball
+   cardtracker season report nba --data trends
+   ```
+
+Values are 0-100 relative to the peak *within each download*, so each file is analysed as its
+own series and never compared to another file. Put one player per file: when several share a
+file, the quieter ones get compressed into a few low numbers.
+
 ## Card Hedge price history (the historical data source)
 
 Daily prices per card and grade back to about spring 2020, plus player index history.
