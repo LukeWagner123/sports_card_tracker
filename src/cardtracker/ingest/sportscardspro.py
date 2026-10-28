@@ -294,3 +294,19 @@ def drop_superseded(conn: sqlite3.Connection, path: str) -> int:
                 removed += 1
     conn.commit()
     return removed
+
+
+def drop_wrong_year_prizm(conn: sqlite3.Connection) -> list[str]:
+    """Drop watchlist Prizm base cards whose year contradicts the player's known debut season
+    (the first Prizm year is max(debut, 2012)). Catches wrong picks for players a later
+    discovery run could not find, which drop_superseded never sees."""
+    stale = conn.execute(
+        "SELECT c.id, p.name, c.year FROM watchlist w JOIN cards c ON c.id = w.card_id "
+        "JOIN players p ON p.id = c.player_id WHERE c.set_name = 'Prizm' AND c.parallel = 'Base' "
+        "AND p.debut_season IS NOT NULL AND c.year != MAX(p.debut_season, ?)", (FIRST_PRIZM_YEAR,)).fetchall()
+    for card_id, _, _ in stale:
+        conn.execute("DELETE FROM watchlist WHERE card_id = ?", (card_id,))
+        conn.execute("DELETE FROM card_external_ids WHERE card_id = ? AND source = ?", (card_id, SOURCE))
+        conn.execute("DELETE FROM price_snapshots WHERE card_id = ? AND source = ?", (card_id, SOURCE))
+    conn.commit()
+    return [f"{name} {year}" for _, name, year in stale]

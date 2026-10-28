@@ -121,3 +121,14 @@ def test_compare_rows_multiples_change_and_residuals(conn):
 
     ranked = compare.cheap_vs_performance(rows, compare.nfl_performance(conn, 2025))
     assert ranked[0][0].player == "QB B"
+
+
+def test_drop_wrong_year_prizm(conn, tmp_path):
+    conn.execute("INSERT INTO players (id, name, sport, debut_season) VALUES (1, 'Derrick Henry', 'football', 2016), "
+                 "(2, 'Matthew Stafford', 'football', 2009), (3, 'Puka Nacua', 'football', 2023)")
+    for cid, pid, year in ((1, 1, 2023), (2, 2, 2012), (3, 3, 2023)):
+        conn.execute("INSERT INTO cards (id, player_id, year, set_name, card_number) VALUES (?, ?, ?, 'Prizm', '1')",
+                     (cid, pid, year))
+        conn.execute("INSERT INTO watchlist (card_id, added_at) VALUES (?, '2026-10-28')", (cid,))
+    assert scp.drop_wrong_year_prizm(conn) == ["Derrick Henry 2023"]
+    assert [r[0] for r in conn.execute("SELECT card_id FROM watchlist ORDER BY 1")] == [2, 3]

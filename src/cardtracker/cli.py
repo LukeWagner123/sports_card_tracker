@@ -164,6 +164,9 @@ def cmd_scp(args) -> None:
         removed = scp.drop_superseded(conn, args.out)
         if removed:
             print(f"removed {removed} previously discovered cards that this run replaced")
+        wrong = scp.drop_wrong_year_prizm(conn)
+        if wrong:
+            print(f"removed cards whose year contradicts the player's rookie season: {', '.join(wrong)}")
         print("now run `scp snapshot`")
         return
     if args.action == "link":
