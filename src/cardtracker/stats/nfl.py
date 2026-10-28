@@ -54,3 +54,22 @@ def ingest_season(conn: sqlite3.Connection, season: int, fetcher: Fetcher | None
             run.rows_written += write_stats(conn, pid, rec["season"], as_of, rec["metrics"], SOURCE)
         conn.commit()
     return run.rows_written
+
+
+PLAYERS_URL = "https://github.com/nflverse/nflverse-data/releases/download/players/players.csv"
+
+
+def ingest_debuts(conn: sqlite3.Connection, fetcher: Fetcher | None = None) -> int:
+    """Set players.debut_season (nflverse rookie_season) for players already linked by nflverse id."""
+    fetcher = fetcher or Fetcher(min_interval=1.0)
+    with track_run(conn, f"{SOURCE}:debuts") as run:
+        for row in csv.DictReader(io.StringIO(fetcher.get(PLAYERS_URL).text)):
+            if not row.get("rookie_season", "").isdigit():
+                continue
+            cur = conn.execute(
+                "UPDATE players SET debut_season = ? WHERE id = ("
+                "  SELECT player_id FROM player_external_ids WHERE source = ? AND external_id = ?)",
+                (int(row["rookie_season"]), SOURCE, row["gsis_id"]))
+            run.rows_written += cur.rowcount
+        conn.commit()
+    return run.rows_written

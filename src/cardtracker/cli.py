@@ -33,6 +33,11 @@ def cmd_init_db(args) -> None:
 def cmd_stats(args) -> None:
     from cardtracker.stats import nba, nfl
 
+    if args.league == "nfl-debuts":
+        print(f"set rookie season for {nfl.ingest_debuts(open_db())} NFL players")
+        return
+    if args.season is None:
+        sys.exit("season is required, e.g. `cardtracker stats nfl 2025`")
     module = {"nba": nba, "nfl": nfl}[args.league]
     rows = module.ingest_season(open_db(), args.season)
     print(f"{args.league} {args.season}: wrote {rows} stat rows")
@@ -138,6 +143,29 @@ def cmd_scp(args) -> None:
         print(scp.purge(conn))
         return
     client = scp.SportsCardsProClient()
+    if args.action == "discover":
+        players = []
+        if args.nfl_top:
+            players += [(r["name"], "football", r["debut_season"]) for r in conn.execute(
+                # One row per player: stats are re-ingested daily, so a season has several as_of dates.
+                "SELECT p.name, p.debut_season FROM players p JOIN player_stats s ON s.player_id = p.id "
+                "WHERE p.sport = 'football' AND s.season = ? AND s.metric = 'fantasy_points_ppr' "
+                "GROUP BY p.id ORDER BY MAX(s.value) DESC LIMIT ?", (args.season, args.nfl_top))]
+        if args.nba_file:
+            players += [(line.strip(), "basketball", None) for line in Path(args.nba_file).read_text().splitlines()
+                        if line.strip() and not line.startswith("#")]
+        missing = scp.build_watchlist(client, players, args.out)
+        print(f"wrote {len(players) - len(missing)} cards to {args.out}")
+        if missing:
+            print(f"  no base Prizm card found for: {', '.join(missing)}")
+        from cardtracker.watchlist import import_csv
+        print(f"imported {import_csv(conn, args.out)} watchlist cards; "
+              f"linked {scp.link_from_csv(conn, args.out)} new")
+        removed = scp.drop_superseded(conn, args.out)
+        if removed:
+            print(f"removed {removed} previously discovered cards that this run replaced")
+        print("now run `scp snapshot`")
+        return
     if args.action == "link":
         linked, unmatched = scp.link_watchlist(conn, client)
         print(f"linked {linked} cards")
@@ -181,6 +209,43 @@ def cmd_trends_import(args) -> None:
             print(f"  '{term}' is not a known {args.sport} player; stored without a player link")
 
 
+def _money(v: float | None) -> str:
+    return f"${v:,.0f}" if v is not None and v >= 100 else (f"${v:,.2f}" if v is not None else "-")
+
+
+def cmd_compare(args) -> None:
+    from cardtracker.analytics import compare
+
+    conn = open_db()
+    day, rows = compare.card_rows(conn)
+    if not rows:
+        sys.exit("no price snapshots yet; run `scp snapshot` first")
+    print(f"Card values as of {day} (SportsCardsPro)\n")
+    head = f"{'player':<24}{'card':<16}{'raw':>9}{'9':>9}{'PSA 10':>10}{'10/raw':>8}{'10/9':>6}{'sales/yr':>9}"
+    has_change = any(r.psa10_change_pct is not None for r in rows)
+    print(head + ("  PSA10 chg" if has_change else ""))
+    for sport in ("football", "basketball"):
+        group = sorted((r for r in rows if r.sport == sport), key=lambda r: -(r.psa10 or 0))
+        if not group:
+            continue
+        print(f"-- {sport} ({len(group)} cards)")
+        for r in group:
+            line = (f"{r.player[:23]:<24}{f'{r.year} #{r.card_number}':<16}{_money(r.raw):>9}{_money(r.grade9):>9}"
+                    f"{_money(r.psa10):>10}{(f'{r.psa10_over_raw:.1f}x' if r.psa10_over_raw else '-'):>8}"
+                    f"{(f'{r.psa10_over_9:.1f}x' if r.psa10_over_9 else '-'):>6}{(r.volume or 0):>9,}")
+            if has_change:
+                line += f"  {r.psa10_change_pct:+.1f}%" if r.psa10_change_pct is not None else "  -"
+            print(line)
+
+    ranked = compare.cheap_vs_performance(rows, compare.nfl_performance(conn, args.season))
+    if ranked:
+        print(f"\nNFL: PSA 10 price vs. {args.season} PPR points/game (standardized within position)")
+        print("negative = cheaper than similarly performing peers; a research shortlist, not a buy signal")
+        for r, v in ranked:
+            print(f"  {r.player[:23]:<24}{(r.position or ''):<4}{_money(r.psa10):>10}  "
+                  f"perf {v.performance:+.2f}  vs. fair {_money(v.fair_price):>8}  {v.residual:+.2f}")
+
+
 def main(argv: list[str] | None = None) -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(prog="cardtracker")
@@ -189,8 +254,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("init-db", help="create the database schema").set_defaults(func=cmd_init_db)
 
     stats = sub.add_parser("stats", help="ingest player season stats")
-    stats.add_argument("league", choices=["nba", "nfl"])
-    stats.add_argument("season", type=int, help="year the season starts, e.g. 2025 for 2025-26")
+    stats.add_argument("league", choices=["nba", "nfl", "nfl-debuts"],
+                       help="nfl-debuts: rookie seasons for NFL players already loaded")
+    stats.add_argument("season", type=int, nargs="?", help="year the season starts, e.g. 2025 for 2025-26")
     stats.set_defaults(func=cmd_stats)
 
     runs = sub.add_parser("runs", help="show recent ingestion runs; exits 1 if any are unhealthy")
@@ -208,6 +274,12 @@ def main(argv: list[str] | None = None) -> None:
 
     scp = sub.add_parser("scp", help="SportsCardsPro price guide (current values)").add_subparsers(
         dest="action", required=True)
+    disc = scp.add_parser("discover", help="build a watchlist of each player's first Prizm base card")
+    disc.add_argument("--nfl-top", type=int, default=0, help="top N NFL players by PPR points in --season")
+    disc.add_argument("--season", type=int, default=2025)
+    disc.add_argument("--nba-file", help="text file with one NBA player per line")
+    disc.add_argument("--out", default="watchlists/generated.csv")
+    disc.set_defaults(func=cmd_scp)
     scp.add_parser("link", help="match watchlist cards to SportsCardsPro products").set_defaults(func=cmd_scp)
     scp.add_parser("snapshot", help="record today's values for linked cards (run daily)").set_defaults(func=cmd_scp)
     purge = scp.add_parser("purge", help="delete all SportsCardsPro data (required when you cancel)")
@@ -236,6 +308,10 @@ def main(argv: list[str] | None = None) -> None:
     pimp = prices.add_parser("import", help="load historical sales from CSV")
     pimp.add_argument("csv")
     pimp.set_defaults(func=cmd_prices_import)
+
+    cmp_ = sub.add_parser("compare", help="compare cards: grade multiples, liquidity, price vs. performance")
+    cmp_.add_argument("--season", type=int, default=2025, help="NFL season for performance")
+    cmp_.set_defaults(func=cmd_compare)
 
     tr = sub.add_parser("trends", help="Google Trends search interest").add_subparsers(dest="action", required=True)
     trimp = tr.add_parser("import", help="load Google Trends CSV exports (one player per file is best)")
