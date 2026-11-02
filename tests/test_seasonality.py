@@ -110,3 +110,26 @@ def test_price_import_idempotent_and_reports_missing(conn, tmp_path):
     imported, missing = import_prices(conn, f)
     assert imported == 2 and missing == ["Nobody 2020 Prizm #9"]
     assert import_prices(conn, f)[0] == 0
+
+
+def test_detrend_removes_steady_decline():
+    """A card falling steadily all year has no seasonality once its own trend is removed."""
+    from cardtracker.analytics.seasonality import drift_per_day
+    start = date(2021, 1, 1)
+    s = [(start + timedelta(days=i), 1000 * math.exp(-0.002 * i)) for i in range(800)]
+    assert drift_per_day(s, date(2022, 1, 1)) == pytest.approx(-0.002, rel=0.05)
+
+
+def test_detrended_month_of_year_flat_for_pure_trend(tmp_path):
+    c = connect(":memory:")
+    init_db(c)
+    c.execute("INSERT INTO players (id, name, sport) VALUES (1, 'P', 'football')")
+    c.execute("INSERT INTO cards (id, player_id, year, set_name, card_number) VALUES (1, 1, 2020, 'Prizm', '1')")
+    start = date(2021, 1, 1)
+    for i in range(1100):
+        c.execute("INSERT INTO price_snapshots (card_id, grader, grade, price_usd, snapshot_date, source) "
+                  "VALUES (1, 'PSA', 10, ?, ?, 'cardhedge')", (1000 * math.exp(-0.002 * i), (start + timedelta(days=i)).isoformat()))
+    raw = {r.key: r.median_pct for r in sz.month_of_year(c, "NFL", data="snapshots")}
+    flat = {r.key: r.median_pct for r in sz.month_of_year(c, "NFL", data="snapshots", detrend=True)}
+    assert raw["Jan"] - raw["Dec"] > 40                 # falling market fakes a Jan-high, Dec-low pattern
+    assert max(abs(v) for v in flat.values()) < 3       # gone once the trend is removed

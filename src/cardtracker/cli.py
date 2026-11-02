@@ -122,11 +122,13 @@ def cmd_season_report(args) -> None:
 
     conn = open_db()
     league = args.league.upper()
-    kw = {"grader": args.grader, "grade": args.grade, "data": args.data}
+    kw = {"grader": args.grader, "grade": args.grade, "data": args.data, "source": args.source,
+          "detrend": args.detrend}
     level = sz.SPARSE_LEVEL if args.data == "trends" else {}
     labels = {"player_index": "player indexes", "trends": "search interest, not prices"}
     label = labels.get(args.data, f"{args.grader or 'all graders'} {args.grade or ''}")
-    print(f"{league} seasonality from {args.data} ({label.strip()})")
+    print(f"{league} seasonality from {args.data} ({label.strip()})"
+          + ("; net of each card's own 12-month trend" if args.detrend else ""))
     _print_summaries("Change over each phase", sz.phase_returns(conn, league, **kw, **level))
     _print_summaries(f"Level vs. {args.event} date", sz.event_study(conn, league, args.event, **kw, **level))
     _print_summaries("Month vs. that year's median",
@@ -328,6 +330,10 @@ def main(argv: list[str] | None = None) -> None:
     rep.add_argument("--grader", help="e.g. PSA")
     rep.add_argument("--grade", type=float, help="e.g. 10")
     rep.add_argument("--event", default="playoffs_start")
+    rep.add_argument("--source", default="cardhedge", help="with --data snapshots: which price guide")
+    rep.add_argument("--detrend", action="store_true",
+                     help="subtract each card's surrounding 12-month trend, so a rising or falling market "
+                          "doesn't read as a seasonal effect")
     rep.add_argument("--data", default="sales", choices=["sales", "snapshots", "player_index", "trends"],
                      help="sales, daily price-guide values (e.g. Card Hedge history), player indexes, "
                           "or Google Trends search interest")

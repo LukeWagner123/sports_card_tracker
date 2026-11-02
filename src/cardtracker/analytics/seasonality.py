@@ -52,7 +52,7 @@ SPARSE_LEVEL = {"window_days": 16, "min_sales": 1}
 
 
 def load_series(conn: sqlite3.Connection, league: str, grader: str | None = None,
-                grade: float | None = None, data: str = "sales") -> dict[tuple, Series]:
+                grade: float | None = None, data: str = "sales", source: str | None = None) -> dict[tuple, Series]:
     """Series for one league, grouped by (card_id, grader, grade); by (player_id,) for player
     indexes; by (player_id, batch) for trends, since each Trends download has its own scale.
     grader/grade apply only to card prices."""
@@ -76,13 +76,16 @@ def load_series(conn: sqlite3.Connection, league: str, grader: str | None = None
         sql = ("SELECT s.card_id, s.grader, s.grade, s.snapshot_date AS d, s.price_usd "
                "FROM price_snapshots s JOIN cards c ON c.id = s.card_id JOIN players p ON p.id = c.player_id "
                "WHERE p.sport = ? AND s.price_usd > 0")
+        # Different price guides disagree on level; mixing them in one series fakes moves.
+        if source:
+            sql += " AND s.source = ?"
     elif data == "sales":
         sql = ("SELECT s.card_id, s.grader, s.grade, substr(s.sold_at, 1, 10) AS d, s.price_usd "
                "FROM sales s JOIN cards c ON c.id = s.card_id JOIN players p ON p.id = c.player_id "
                "WHERE p.sport = ? AND s.price_usd > 0")
     else:
         raise ValueError(f"data must be one of {DATA_SOURCES}")
-    params: list = [sport]
+    params: list = [sport] + ([source] if data == "snapshots" and source else [])
     if grader:
         sql += " AND s.grader = ?"
         params.append(grader)
@@ -115,25 +118,47 @@ def _summarize(key: str, obs: list[tuple[int, float]]) -> Summary | None:
                    {s: median(v) for s, v in sorted(seasons.items())})
 
 
+HALF_YEAR = timedelta(days=182)
+
+
+def drift_per_day(series: Series, mid: date, window_days: int = 14, min_sales: int = 2) -> float | None:
+    """The card's trend around `mid`: log change per day across the surrounding year. Subtracting
+    it separates seasonal moves from a market that was rising or falling all year (e.g. the
+    2021-22 crash, which otherwise makes every later date look worse than every earlier one)."""
+    a = level_at(series, mid - HALF_YEAR, window_days, min_sales)
+    b = level_at(series, mid + HALF_YEAR, window_days, min_sales)
+    return math.log(b / a) / (2 * HALF_YEAR.days) if a and b else None
+
+
 def phase_returns(conn: sqlite3.Connection, league: str, grader: str | None = None,
                   grade: float | None = None, window_days: int = 14, min_sales: int = 2,
-                  data: str = "sales") -> list[Summary]:
-    series = load_series(conn, league, grader, grade, data)
+                  data: str = "sales", source: str | None = None, detrend: bool = False) -> list[Summary]:
+    """Log change over each phase; with detrend, minus the card's own trend over the same days."""
+    series = load_series(conn, league, grader, grade, data, source)
     obs: dict[str, list[tuple[int, float]]] = defaultdict(list)
     for ph in phases(conn, league):
         for s in series.values():
             a = level_at(s, ph.start, window_days, min_sales)
             b = level_at(s, ph.end, window_days, min_sales)
-            if a and b:
-                obs[ph.name].append((ph.season, math.log(b / a)))
+            if not (a and b):
+                continue
+            r = math.log(b / a)
+            if detrend:
+                drift = drift_per_day(s, ph.start + (ph.end - ph.start) / 2, window_days, min_sales)
+                if drift is None:
+                    continue
+                r -= drift * (ph.end - ph.start).days
+            obs[ph.name].append((ph.season, r))
     return [summ for name in PHASES if (summ := _summarize(name, obs[name]))]
 
 
 def event_study(conn: sqlite3.Connection, league: str, event: str, weeks_before: int = 8,
                 weeks_after: int = 12, grader: str | None = None, grade: float | None = None,
-                window_days: int = 7, min_sales: int = 2, data: str = "sales") -> list[Summary]:
-    """Average log price relative to the event date, at each weekly offset."""
-    series = load_series(conn, league, grader, grade, data)
+                window_days: int = 7, min_sales: int = 2, data: str = "sales",
+                source: str | None = None, detrend: bool = False) -> list[Summary]:
+    """Average log price relative to the event date, at each weekly offset; with detrend, net of
+    the card's trend around the event."""
+    series = load_series(conn, league, grader, grade, data, source)
     obs: dict[int, list[tuple[int, float]]] = defaultdict(list)
     for season, ev in events(conn, league).items():
         if event not in ev:
@@ -142,19 +167,37 @@ def event_study(conn: sqlite3.Connection, league: str, event: str, weeks_before:
             base = level_at(s, ev[event], window_days, min_sales)
             if not base:
                 continue
+            drift = drift_per_day(s, ev[event]) if detrend else 0.0
+            if drift is None:
+                continue
             for w in range(-weeks_before, weeks_after + 1):
                 lvl = level_at(s, ev[event] + timedelta(weeks=w), window_days, min_sales)
                 if lvl:
-                    obs[w].append((season, math.log(lvl / base)))
+                    obs[w].append((season, math.log(lvl / base) - drift * 7 * w))
     return [summ for w in sorted(obs) if (summ := _summarize(f"{w:+d}w", obs[w]))]
 
 
 def month_of_year(conn: sqlite3.Connection, league: str, grader: str | None = None,
-                  grade: float | None = None, min_sales: int = 2, data: str = "sales") -> list[Summary]:
-    """Each calendar month's median price vs. the same card's median for that year."""
-    series = load_series(conn, league, grader, grade, data)
+                  grade: float | None = None, min_sales: int = 2, data: str = "sales",
+                  source: str | None = None, detrend: bool = False) -> list[Summary]:
+    """Each calendar month's median price vs. the same card's median for that calendar year, or with
+    detrend, vs. its median over the 12 months centred on that month (so a steady rise or fall
+    through the year doesn't show up as a month effect)."""
+    series = load_series(conn, league, grader, grade, data, source)
     obs: dict[int, list[tuple[int, float]]] = defaultdict(list)
     for s in series.values():
+        if detrend:
+            dates = [d for d, _ in s]
+            months = sorted({(d.year, d.month) for d in dates})
+            for year, month in months:
+                mid = date(year, month, 15)
+                if dates[0] > mid - HALF_YEAR + timedelta(days=31) or dates[-1] < mid + HALF_YEAR - timedelta(days=31):
+                    continue                      # need most of a year on both sides
+                in_month = [p for d, p in s if (d.year, d.month) == (year, month)]
+                window = [p for d, p in s if mid - HALF_YEAR <= d <= mid + HALF_YEAR]
+                if len(in_month) >= min_sales and len(window) >= 6 * min_sales:
+                    obs[month].append((year, math.log(median(in_month) / median(window))))
+            continue
         by_year: dict[int, list[float]] = defaultdict(list)
         by_month: dict[tuple[int, int], list[float]] = defaultdict(list)
         for d, p in s:
