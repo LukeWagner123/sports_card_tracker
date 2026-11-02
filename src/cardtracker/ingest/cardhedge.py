@@ -38,10 +38,12 @@ class CardHedgeClient:
         self.calls += 1
         return self.fetcher.post(f"{API}/{path}", json=body, headers={"X-API-Key": self.api_key}).json()
 
-    def card_search(self, search: str, number: str | None = None, page_size: int = 50) -> list[dict]:
-        body = {"search": search, "page": 1, "page_size": page_size}
-        if number:
-            body["number"] = number
+    def card_search(self, search: str | None = None, number: str | None = None, set_name: str | None = None,
+                    page_size: int = 100) -> list[dict]:
+        body = {"page": 1, "page_size": page_size}
+        for key, value in (("search", search), ("number", number), ("set", set_name)):
+            if value:
+                body[key] = value
         return self._post("card-search", body).get("cards", [])
 
     def prices_by_card(self, card_id: str, grade: str, end_date: date, days: int) -> list[dict]:
@@ -74,10 +76,12 @@ def _fold(text: str) -> str:
 
 def best_card(cards: list[dict], year: int, set_name: str, sport: str, number: str,
               parallel: str, player: str) -> dict | None:
-    """The one result for an exact card, or None if zero or several fit.
+    """The result for an exact card, or None if none fits.
 
     Card Hedge set names look like '2018 Panini Prizm Basketball'; requiring the set name to end
     with '<set> <Sport>' keeps 'Prizm' from matching 'Prizm Mosaic' or 'Prizm Draft Picks'.
+    The catalog has duplicate records for some cards (e.g. 'Lebron James' and 'LeBron James');
+    the one with the most recent sales is the record that carries the price data.
     """
     want_end = _fold(f"{set_name} {sport}")
     surname = _fold(last_name(player))
@@ -89,7 +93,7 @@ def best_card(cards: list[dict], year: int, set_name: str, sport: str, number: s
         and _fold(c.get("variant", "") or "base") == _fold(parallel)
         and surname in _fold(c.get("player", ""))
     ]
-    return fits[0] if len(fits) == 1 else None
+    return max(fits, key=lambda c: c.get("30 Day Sales") or 0) if fits else None
 
 
 def link_cards(conn: sqlite3.Connection, client: CardHedgeClient) -> tuple[int, list[str]]:
@@ -104,8 +108,15 @@ def link_cards(conn: sqlite3.Connection, client: CardHedgeClient) -> tuple[int, 
     linked, unmatched = 0, []
     for r in rows:
         query = " ".join(str(v) for v in (r["year"], r["manufacturer"] or "", r["set_name"], r["player"]) if v)
-        match = best_card(client.card_search(query, number=r["card_number"]), r["year"], r["set_name"],
-                          r["sport"], r["card_number"], r["parallel"], r["player"])
+        args = (r["year"], r["set_name"], r["sport"], r["card_number"], r["parallel"], r["player"])
+        match = None
+        if r["manufacturer"]:
+            # Exact set + number returns every version of this one card, so a base card can't be
+            # crowded off the page by other cards' parallels.
+            exact_set = f"{r['year']} {r['manufacturer']} {r['set_name']} {r['sport'].title()}"
+            match = best_card(client.card_search(number=r["card_number"], set_name=exact_set), *args)
+        if not match:
+            match = best_card(client.card_search(query, number=r["card_number"]), *args)
         if not match:
             unmatched.append(f"{query} #{r['card_number']}")
             continue

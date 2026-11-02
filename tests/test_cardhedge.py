@@ -35,9 +35,11 @@ class FakeClient:
         self.calls = 0
         self.requests = []
 
-    def card_search(self, search, number=None, page_size=50):
+    def card_search(self, search=None, number=None, set_name=None, page_size=100):
         self.calls += 1
-        return LUKA_RESULTS if "Doncic" in search else []
+        if set_name:
+            return [c for c in LUKA_RESULTS if c["set"] == set_name and c["number"] == number]
+        return LUKA_RESULTS if search and "Doncic" in search else []
 
     def prices_by_card(self, card_id, grade, end_date, days):
         self.calls += 1
@@ -85,8 +87,10 @@ def test_parse_grade():
 def test_best_card_rejects_parallels_and_similar_sets():
     assert ch.best_card(LUKA_RESULTS, 2018, "Prizm", "basketball", "280", "Base", "Luka Doncic")["card_id"] == "A"
     assert ch.best_card(LUKA_RESULTS, 2018, "Prizm", "basketball", "#280", "Silver", "Luka Doncic")["card_id"] == "B"
-    assert ch.best_card(LUKA_RESULTS + [LUKA_RESULTS[0]], 2018, "Prizm", "basketball", "280", "Base",
-                        "Luka Doncic") is None                       # duplicate -> ambiguous
+    # Duplicate catalog records: the one with more recent sales wins.
+    dup = dict(LUKA_RESULTS[0], card_id="A2", **{"30 Day Sales": 40})
+    assert ch.best_card(LUKA_RESULTS + [dup], 2018, "Prizm", "basketball", "280", "Base",
+                        "Luka Dončić")["card_id"] == "A2"
 
 
 def test_windows_are_calendar_years():
