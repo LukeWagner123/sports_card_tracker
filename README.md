@@ -68,8 +68,9 @@ order is PSA 10 for every card, then PSA 9, then Raw, then player indexes, alter
 sports so a short run covers all three.
 
 **Scheduled run** (`.github/workflows/daily-pull.yml`): runs `ch daily` for 45 minutes a day and
-keeps the database on a `data` branch (`scripts/db_snapshot.sh`). It does nothing unless the
-repository is **private**, because Card Hedge data must not be republished. Setup:
+keeps the database on a `data` branch (`scripts/db_snapshot.sh`), always encrypted with your
+Card Hedge API key (or `SNAPSHOT_KEY`), so the branch exposes only ciphertext. Keep the key: it
+is the only way to restore. The job does nothing unless the repository is **private**. Setup:
 1. Make the repository private.
 2. Add the repository secret `CARDHEDGE_API_KEY`.
 3. Merge the workflow into the default branch; scheduled workflows only run from there.
