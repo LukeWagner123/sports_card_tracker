@@ -14,6 +14,8 @@ import sqlite3
 import unicodedata
 from datetime import date, timedelta
 
+import requests
+
 from cardtracker.db import store_raw
 from cardtracker.fetcher import Fetcher
 from cardtracker.names import last_name
@@ -219,7 +221,13 @@ def fetch_player_index(conn: sqlite3.Connection, client: CardHedgeClient, today:
                 if end < today and _window_done(conn, key):
                     continue
                 start = end - timedelta(days=days - 1)       # start_date is inclusive here
-                points = client.player_index_history(link["external_id"], start, end)
+                try:
+                    points = client.player_index_history(link["external_id"], start, end)
+                except requests.HTTPError as e:
+                    # Card Hedge answers 404 for a window before the player's index existed.
+                    if e.response is None or e.response.status_code != 404:
+                        raise
+                    points = []
                 store_raw(conn, SOURCE, key, {"points": points})
                 usable = [p for p in points if p.get("value") is not None and not p.get("withheld")]
                 for p in usable:

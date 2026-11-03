@@ -147,3 +147,20 @@ def test_seasonality_runs_on_history(conn):
     res = {r.key: r for r in sz.phase_returns(conn, "NBA", "PSA", 10.0, data="snapshots")}
     # Synthetic prices rise steadily, so every phase shows a small positive return.
     assert res["playoffs"].median > 0 and res["offseason"].n == 1
+
+
+def test_player_index_treats_404_as_start_of_history(conn):
+    import requests
+
+    class NoOldIndex(FakeClient):
+        def player_index_history(self, player_id, start, end):
+            if end.year < 2025:
+                resp = requests.Response()
+                resp.status_code = 404
+                raise requests.HTTPError(response=resp)
+            return super().player_index_history(player_id, start, end)
+
+    client = NoOldIndex()
+    ch.link_players(conn, client, "basketball")
+    assert ch.fetch_player_index(conn, client, today=TODAY) > 0
+    assert conn.execute("SELECT MIN(date) FROM player_index").fetchone()[0] == "2025-01-02"   # Jan 1 is withheld
