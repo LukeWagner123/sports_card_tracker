@@ -181,3 +181,11 @@ CREATE TABLE IF NOT EXISTS search_interest (
     source        TEXT NOT NULL,
     PRIMARY KEY (term, geo, batch, date)
 );
+
+-- API calls made per source per UTC day, so separate runs share one daily allowance.
+CREATE TABLE IF NOT EXISTS api_usage (
+    source        TEXT NOT NULL,
+    day           TEXT NOT NULL,          -- YYYY-MM-DD, UTC
+    calls         INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (source, day)
+);

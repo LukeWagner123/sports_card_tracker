@@ -25,10 +25,18 @@ class DisallowedError(RuntimeError):
     """robots.txt disallows this URL."""
 
 
+class RateLimitedError(RuntimeError):
+    """The source asked us to wait longer than max_wait (e.g. a daily quota is used up)."""
+
+    def __init__(self, message: str, response: requests.Response):
+        super().__init__(message)
+        self.response = response
+
+
 class Fetcher:
     def __init__(self, min_interval: float = 3.0, max_retries: int = 4, backoff: float = 2.0,
                  timeout: float = 30.0, session: requests.Session | None = None,
-                 check_robots: bool = True, sleep=time.sleep):
+                 check_robots: bool = True, sleep=time.sleep, max_wait: float | None = None):
         self.min_interval = min_interval
         self.max_retries = max_retries
         self.backoff = backoff
@@ -36,6 +44,7 @@ class Fetcher:
         self.session = session or requests.Session()
         self.session.headers.setdefault("User-Agent", USER_AGENT)
         self.check_robots = check_robots
+        self.max_wait = max_wait
         self._sleep = sleep
         self._last_request: dict[str, float] = {}
         self._robots: dict[str, urllib.robotparser.RobotFileParser] = {}
@@ -84,6 +93,8 @@ class Fetcher:
             if resp.status_code in RETRY_STATUSES and attempt < self.max_retries:
                 retry_after = resp.headers.get("Retry-After", "")
                 delay = float(retry_after) if retry_after.isdigit() else self.backoff * 2 ** attempt
+                if resp.status_code == 429 and self.max_wait is not None and delay > self.max_wait:
+                    raise RateLimitedError(f"429 from {url}; Retry-After {retry_after}s", resp)
                 self._sleep(delay)
                 continue
             resp.raise_for_status()

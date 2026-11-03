@@ -41,22 +41,41 @@ file, the quieter ones get compressed into a few low numbers.
 
 ## Card Hedge price history (the historical data source)
 
-Daily prices per card and grade back to about spring 2020, plus player index history.
-Put `CARDHEDGE_API_KEY` (and your tier's `CARDHEDGE_REQUESTS_PER_MINUTE`) in `.env`.
+Daily prices per card and grade back to about spring 2020, plus player index history (from
+October 2024). Put `CARDHEDGE_API_KEY` (and your tier's `CARDHEDGE_REQUESTS_PER_MINUTE`) in `.env`.
 
 ```bash
-cardtracker ch link                          # match watchlist cards to Card Hedge cards
-cardtracker ch history                       # page each card's history back to its start
+cardtracker ch daily                         # everything below, within the day's call budget
+cardtracker ch discover                      # add the most-traded cards of flagship sets
+cardtracker ch history --grades "PSA 10"     # page each linked card's history back to its start
 cardtracker ch players                       # player index history for watchlist players
-cardtracker season report nba --data snapshots --grader PSA --grade 10
-cardtracker season report nfl --data player_index
+cardtracker season report epl --data snapshots --grader PSA --grade 10 --detrend
 ```
 
-`ch history` costs about 7 calls per card per grade (one per calendar year). At the base tier's
-10 requests/minute, 100 cards x 3 grades is ~2,100 calls, about 3.5 hours; it stops at
-`--max-calls` (default 4,500/day) and resumes where it left off. Finished years are never
-re-fetched; re-running daily only refreshes the current year. Prices are Card Hedge's daily
-computed values, not individual sales.
+**Card universe** (`ch discover`): base rookie cards from Panini Prizm Basketball and Football,
+2012 to now, and base cards of every player in the Premier League's flagship sets (Panini Prizm
+2019-2024, Topps from 2025). For each set it keeps the most-traded cards by Card Hedge's 30-day
+sales: up to 30 per NBA/NFL set with 5+ sales a month, up to 40 per Premier League set with 1+.
+Sets are rescanned monthly. Card Hedge's catalog needs care. Base cards are labelled "Base" or
+"Prizm". Inserts are also labelled "Base", so the subset must be the base set. The newest sets
+carry no rookie flags, so NFL rookies there are checked against nflverse rookie seasons.
+
+**Budget**: the plan allows 5,000 calls a day at 10 a minute (8.3 hours to use it all). Calls are
+counted per UTC day in `api_usage` across every run, and `ch daily --budget` (default 4,800)
+stops there. A full history costs about 6 calls per card per grade. A card's finished years are
+never re-fetched, and its current year is refreshed every `--refresh-days` (default 14). The
+order is PSA 10 for every card, then PSA 9, then Raw, then player indexes, alternating between
+sports so a short run covers all three.
+
+**Scheduled run** (`.github/workflows/daily-pull.yml`): runs `ch daily` for 45 minutes a day and
+keeps the database on a `data` branch (`scripts/db_snapshot.sh`). It does nothing unless the
+repository is **private**, because Card Hedge data must not be republished. Setup:
+1. Make the repository private.
+2. Add the repository secret `CARDHEDGE_API_KEY`.
+3. Merge the workflow into the default branch; scheduled workflows only run from there.
+Private repositories get 2,000 free Actions minutes a month, so 45 minutes a day is about 450
+calls. That keeps 430 cards current. A large backfill is faster run locally:
+`cardtracker ch daily` uses the full day's allowance in about 8 hours.
 
 ## SportsCardsPro price guide
 
@@ -79,10 +98,16 @@ and the offseason.
 ```bash
 cardtracker calendar fetch nfl                 # NFL season dates 1999-present (nflverse schedules)
 cardtracker calendar fetch nba --first 2015    # NBA dates from stats.nba.com (run from home)
+cardtracker calendar fetch epl --first 2012    # Premier League first/last matchday (openfootball)
+cardtracker calendar import calendars/epl_overrides.csv       # 2019-20: the source file is wrong
+cardtracker calendar import calendars/soccer_tournaments.csv  # World Cups, Euros, Club World Cup
 cardtracker calendar import my_events.csv      # extra events: league,season,event,date,source
 cardtracker prices import history.csv          # historical sales (see src/cardtracker/prices.py)
 cardtracker season report nfl --grader PSA --grade 10 --event playoffs_start
 ```
+
+The Premier League has no playoffs: its phases are early/mid/late season and the offseason, and
+international tournaments are events for `--event tournament_start`.
 
 The report shows, pooled across cards and seasons with a per-season breakdown:
 - **Return over each phase**: early/mid/late season, playoffs, offseason.

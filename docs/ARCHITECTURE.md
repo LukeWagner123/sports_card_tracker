@@ -31,16 +31,17 @@ Every source implements the same shape: fetch → store the raw payload in `raw_
 
 All HTTP goes through `fetcher.Fetcher`: robots.txt checked first, per-host rate limit, retries with backoff on 429/5xx (honoring `Retry-After`), and an immediate `BlockedError` on 403 or a bot challenge — never retried or worked around. Every run is wrapped in `runs.track_run`, which records status and row count in `source_runs` and marks a run `suspect` when it writes nothing or less than half of the previous good run (the usual symptom of a source changing format). `cardtracker runs` exits non-zero when anything is unhealthy, so a scheduler can alert on it.
 
-Sports in scope: **basketball and football**.
+Sports in scope: **basketball, football and soccer (Premier League focus)**.
 
 | Source | Data | Access | Status |
 |---|---|---|---|
 | PSA Public API | Cert lookup, spec population | Free token, low daily limit | Client stubbed |
 | eBay Browse API | Active auctions observed to their end → observed sale prices (lower bound) | Free developer key, 5,000 calls/day | **Built** (needs keys) |
 | SportsCardsPro / PriceCharting | **Current** values by card + grade, yearly sales volume | Paid API ($50/mo). No history ("Historic prices and historic sales are not supported"); data must be purged when the subscription ends | Built; subscription cancelled and data purged |
-| Card Hedge | Daily price history per card + grade (~2020–), player index history, comps | Paid API key (tier sets 10–500 req/min) or pay-per-call | **Built** (needs key) |
+| Card Hedge | Daily price history per card + grade (~2020–), player index history (Oct 2024–), comps | Paid API: 5,000 calls/day at 10/min on the base tier | **Working**: ~430 discovered cards, daily budgeted pull |
 | Google Trends | Weekly/monthly search interest per player, 2004– (attention, not price) | Free; manual CSV export from trends.google.com | **Built** (`trends import`) |
 | nflverse schedules | NFL season dates 1999– (regular season, each playoff round, Super Bowl) | Free | **Working** |
+| openfootball | Premier League fixtures per season (first/last matchday) | Free, CC0 | **Working** (2019-20 file is wrong; overridden) |
 | Historical sales CSV | Any history obtained elsewhere | `cardtracker prices import` | **Built** |
 | eBay Marketplace Insights | Sold items, last 90 days | Restricted — apply | Not started |
 | nflverse | NFL season stats (QB/RB/WR/TE) | Free, open release CSVs | **Working** |

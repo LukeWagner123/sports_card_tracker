@@ -86,6 +86,8 @@ def cmd_calendar(args) -> None:
     conn = open_db()
     if args.league == "nfl":
         n = calendar.ingest_nfl(conn)
+    elif args.league == "epl":
+        n = calendar.ingest_epl(conn, args.first, args.last)
     else:
         n = calendar.ingest_nba(conn, args.first, args.last)
     print(f"{args.league}: wrote {n} season events")
@@ -184,7 +186,24 @@ def cmd_ch(args) -> None:
     from cardtracker.ingest import cardhedge as ch
 
     conn = open_db()
-    client = ch.CardHedgeClient()
+    client = ch.CardHedgeClient(conn=conn)
+    if args.action in ("daily", "discover"):
+        from cardtracker.stats import nfl
+        try:
+            rookie_seasons = {"football": nfl.rookie_seasons()}
+        except Exception as e:            # discovery still works, with a looser rookie test
+            print(f"nflverse players unavailable ({e}); unflagged NFL sets use first appearance")
+            rookie_seasons = None
+    if args.action == "daily":
+        report = ch.daily(conn, client, budget=args.budget, minutes=args.minutes, refresh_days=args.refresh_days,
+                          rookie_seasons=rookie_seasons)
+        print(" ".join(f"{k}={v}" for k, v in report.items()))
+        print(f"Card Hedge calls today (UTC): {ch.calls_today(conn)}")
+        return
+    if args.action == "discover":
+        print("added cards:", ch.discover(conn, client, rescan_days=args.rescan_days, rookie_seasons=rookie_seasons))
+        print(f"pruned {ch.prune_discovered(conn)} cards the latest scan no longer accepts")
+        return
     if args.action == "link":
         linked, unmatched = ch.link_cards(conn, client)
         print(f"linked {linked} cards")
@@ -197,7 +216,7 @@ def cmd_ch(args) -> None:
         if not result["complete"]:
             print("stopped at --max-calls; re-run to continue (finished windows are skipped)")
     elif args.action == "players":
-        for sport in ("basketball", "football"):
+        for sport in ch.SPORT_WORD:
             linked, unmatched = ch.link_players(conn, client, sport)
             print(f"{sport}: linked {linked} players" + (f"; unmatched: {', '.join(unmatched)}" if unmatched else ""))
         print(f"wrote {ch.fetch_player_index(conn, client)} player index points ({client.calls} calls)")
@@ -298,12 +317,21 @@ def main(argv: list[str] | None = None) -> None:
     hist.add_argument("--max-calls", type=int, default=4500, help="stop after this many API calls")
     hist.set_defaults(func=cmd_ch)
     chp.add_parser("players", help="link watchlist players and fetch player index history").set_defaults(func=cmd_ch)
+    cdisc = chp.add_parser("discover", help="add the most-traded cards of flagship NBA/NFL/Premier League sets")
+    cdisc.add_argument("--rescan-days", type=int, default=30, help="skip sets scanned more recently than this")
+    cdisc.set_defaults(func=cmd_ch)
+    cday = chp.add_parser("daily", help="scheduled run: discover, backfill/refresh prices, player indexes")
+    cday.add_argument("--budget", type=int, default=4800,
+                      help="max Card Hedge calls per UTC day, counted across all runs (plan limit 5,000)")
+    cday.add_argument("--minutes", type=float, help="stop after this many minutes (e.g. a CI time limit)")
+    cday.add_argument("--refresh-days", type=int, default=14, help="re-fetch the current year this often")
+    cday.set_defaults(func=cmd_ch)
 
     cal = sub.add_parser("calendar", help="league season dates").add_subparsers(dest="action", required=True)
     fetch = cal.add_parser("fetch", help="fetch season dates (NFL: nflverse; NBA: stats.nba.com, run from home)")
-    fetch.add_argument("league", choices=["nfl", "nba"])
-    fetch.add_argument("--first", type=int, default=2015, help="NBA only: first season")
-    fetch.add_argument("--last", type=int, default=2025, help="NBA only: last season")
+    fetch.add_argument("league", choices=["nfl", "nba", "epl"])
+    fetch.add_argument("--first", type=int, default=2015, help="NBA/EPL: first season (year it starts)")
+    fetch.add_argument("--last", type=int, default=2025, help="NBA/EPL: last season")
     fetch.set_defaults(func=cmd_calendar)
     cimp = cal.add_parser("import", help="load season events (draft, trade deadline, ...) from CSV")
     cimp.add_argument("csv")
@@ -321,12 +349,12 @@ def main(argv: list[str] | None = None) -> None:
     tr = sub.add_parser("trends", help="Google Trends search interest").add_subparsers(dest="action", required=True)
     trimp = tr.add_parser("import", help="load Google Trends CSV exports (one player per file is best)")
     trimp.add_argument("csv", nargs="+")
-    trimp.add_argument("--sport", required=True, choices=["basketball", "football"])
+    trimp.add_argument("--sport", required=True, choices=["basketball", "football", "soccer"])
     trimp.set_defaults(func=cmd_trends_import)
 
     season = sub.add_parser("season", help="seasonality analysis").add_subparsers(dest="action", required=True)
     rep = season.add_parser("report", help="phase returns, event study, month-of-year")
-    rep.add_argument("league", choices=["nfl", "nba"])
+    rep.add_argument("league", choices=["nfl", "nba", "epl"])
     rep.add_argument("--grader", help="e.g. PSA")
     rep.add_argument("--grade", type=float, help="e.g. 10")
     rep.add_argument("--event", default="playoffs_start")

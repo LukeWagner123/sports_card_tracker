@@ -10,6 +10,11 @@ Phases, for season S:
   late_season    final third -> playoffs_start
   playoffs       playoffs_start -> championship
   offseason      championship -> season_start of S+1
+
+Leagues without playoffs (the Premier League) end at regular_season_end: their thirds span
+season_start -> regular_season_end, and the offseason runs from there to the next season_start.
+International tournaments (World Cup, Euros; mostly in the soccer offseason, but Qatar 2022 was
+mid-season) are imported as tournament_start / tournament_final events, for event studies.
 """
 
 import csv
@@ -18,15 +23,20 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+import requests
+
 from cardtracker.fetcher import Fetcher
 from cardtracker.runs import track_run
 
 NFL_SCHEDULE_URL = "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv"
 NBA_GAMELOG_URL = "https://stats.nba.com/stats/leaguegamelog"
 NFL_PLAYOFF_TYPES = {"WC", "DIV", "CON", "SB"}
+# openfootball (CC0 public domain): one JSON file of fixtures per Premier League season.
+EPL_FIXTURES_URL = "https://raw.githubusercontent.com/openfootball/football.json/master/{label}/en.1.json"
 
 PHASES = ["early_season", "mid_season", "late_season", "playoffs", "offseason"]
-SPORT_LEAGUE = {"football": "NFL", "basketball": "NBA"}
+SPORT_LEAGUE = {"football": "NFL", "basketball": "NBA", "soccer": "EPL"}
+NO_PLAYOFFS = {"EPL"}
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,38 @@ def ingest_nfl(conn: sqlite3.Connection, fetcher: Fetcher | None = None) -> int:
         seasons = nfl_events_from_schedule(fetcher.get(NFL_SCHEDULE_URL).text)
         for season, events in seasons.items():
             run.rows_written += save_events(conn, "NFL", season, events, "nflverse")
+        conn.commit()
+    return run.rows_written
+
+
+def epl_events_from_fixtures(payload: dict, season: int) -> dict[str, str]:
+    """First and last matchday. The league never plays before August of its start year, so a
+    fixture dated earlier means the file is wrong (openfootball's 2019-20 file dates the July 2020
+    restart matches as July 2019): such a season returns nothing, and its dates belong in
+    calendars/epl_overrides.csv instead."""
+    dates = sorted(m["date"] for m in payload.get("matches", []) if m.get("date"))
+    if not dates or dates[0] < f"{season}-08-01":
+        return {}
+    return {"season_start": dates[0], "regular_season_end": dates[-1]}
+
+
+def ingest_epl(conn: sqlite3.Connection, first: int, last: int, fetcher: Fetcher | None = None) -> int:
+    """Premier League season dates (first and last matchday) from openfootball fixtures. For the
+    season in progress the last date is the final scheduled fixture."""
+    fetcher = fetcher or Fetcher(min_interval=1.0)
+    with track_run(conn, "calendar:epl") as run:
+        for season in range(first, last + 1):
+            label = f"{season}-{(season + 1) % 100:02d}"
+            try:
+                payload = fetcher.get(EPL_FIXTURES_URL.format(label=label)).json()
+            except requests.HTTPError as e:
+                if e.response is not None and e.response.status_code == 404:
+                    continue            # season not published yet
+                raise
+            events = epl_events_from_fixtures(payload, season)
+            if not events:
+                print(f"EPL {label}: fixture dates look wrong; skipped (see calendars/epl_overrides.csv)")
+            run.rows_written += save_events(conn, "EPL", season, events, "openfootball")
         conn.commit()
     return run.rows_written
 
@@ -129,19 +171,26 @@ def phases(conn: sqlite3.Connection, league: str) -> list[Phase]:
     """All complete phases for a league. Seasons missing a required date are skipped."""
     ev = events(conn, league)
     out = []
+    playoffs = league not in NO_PLAYOFFS
     for season in sorted(ev):
         e = ev[season]
-        if not {"season_start", "playoffs_start", "championship"} <= e.keys():
+        needed = {"season_start", "playoffs_start", "championship"} if playoffs else {"season_start", "regular_season_end"}
+        if not needed <= e.keys():
             continue
-        start, po = e["season_start"], e["playoffs_start"]
-        third = (po - start) / 3
+        start = e["season_start"]
+        regular_end = e["playoffs_start"] if playoffs else e["regular_season_end"]
+        season_end = e["championship"] if playoffs else e["regular_season_end"]
+        nxt = ev.get(season + 1, {}).get("season_start")
+        if not playoffs and not nxt and season_end >= date.today():
+            continue                    # season in progress: its last date is only scheduled
+        third = (regular_end - start) / 3
         out += [
             Phase(league, season, "early_season", start, start + third),
             Phase(league, season, "mid_season", start + third, start + 2 * third),
-            Phase(league, season, "late_season", start + 2 * third, po),
-            Phase(league, season, "playoffs", po, e["championship"]),
+            Phase(league, season, "late_season", start + 2 * third, regular_end),
         ]
-        nxt = ev.get(season + 1, {}).get("season_start")
+        if playoffs:
+            out.append(Phase(league, season, "playoffs", regular_end, season_end))
         if nxt:
-            out.append(Phase(league, season, "offseason", e["championship"] + timedelta(days=1), nxt))
+            out.append(Phase(league, season, "offseason", season_end + timedelta(days=1), nxt))
     return out

@@ -73,3 +73,16 @@ def ingest_debuts(conn: sqlite3.Connection, fetcher: Fetcher | None = None) -> i
             run.rows_written += cur.rowcount
         conn.commit()
     return run.rows_written
+
+
+def rookie_seasons(fetcher: Fetcher | None = None) -> dict[str, set[int]]:
+    """nflverse rookie season by player name (accent- and case-folded; a name shared by several
+    players maps to all their rookie seasons)."""
+    from cardtracker.ingest.cardhedge import _fold
+
+    fetcher = fetcher or Fetcher(min_interval=1.0)
+    out: dict[str, set[int]] = {}
+    for row in csv.DictReader(io.StringIO(fetcher.get(PLAYERS_URL).text)):
+        if row.get("rookie_season", "").isdigit() and row.get("display_name"):
+            out.setdefault(_fold(row["display_name"]), set()).add(int(row["rookie_season"]))
+    return out

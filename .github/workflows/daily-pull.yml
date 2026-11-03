@@ -1,0 +1,43 @@
+name: daily-pull
+# Daily Card Hedge pull. The database lives on the `data` branch (see scripts/db_snapshot.sh).
+# Needs: a PRIVATE repository (Card Hedge data must not be republished) and the repository
+# secret CARDHEDGE_API_KEY. Scheduled runs only start from the default branch.
+on:
+  schedule:
+    - cron: "17 4 * * *"          # 04:17 UTC, after Card Hedge's daily allowance resets at 00:00
+  workflow_dispatch:
+concurrency:
+  group: daily-pull
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  pull:
+    if: github.event.repository.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARDTRACKER_DB: data/cards.db
+      CARDHEDGE_API_KEY: ${{ secrets.CARDHEDGE_API_KEY }}
+      SNAPSHOT_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - id: restore
+        run: scripts/db_snapshot.sh restore "$CARDTRACKER_DB"
+      - name: Calendars
+        run: |
+          cardtracker init-db
+          cardtracker calendar fetch nfl
+          cardtracker calendar fetch epl --first 2012 --last "$(date -u +%Y)"
+          for f in calendars/*.csv; do cardtracker calendar import "$f"; done
+      - name: Card Hedge
+        # Private repos get 2,000 free Actions minutes a month: 45 minutes a day is ~450 calls.
+        run: cardtracker ch daily --budget 4800 --minutes 45
+      - name: Save database
+        # Never after a failed restore: that would replace the stored database with a new one.
+        if: always() && steps.restore.outcome == 'success'
+        run: scripts/db_snapshot.sh save "$CARDTRACKER_DB"

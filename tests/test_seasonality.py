@@ -133,3 +133,20 @@ def test_detrended_month_of_year_flat_for_pure_trend(tmp_path):
     flat = {r.key: r.median_pct for r in sz.month_of_year(c, "NFL", data="snapshots", detrend=True)}
     assert raw["Jan"] - raw["Dec"] > 40                 # falling market fakes a Jan-high, Dec-low pattern
     assert max(abs(v) for v in flat.values()) < 3       # gone once the trend is removed
+
+
+def test_epl_phases_have_no_playoffs():
+    c = connect(":memory:")
+    init_db(c)
+    for season, (start, end) in {2022: ("2022-08-05", "2023-05-28"), 2023: ("2023-08-11", "2024-05-19")}.items():
+        payload = {"matches": [{"date": end}, {"date": start}, {"date": f"{season + 1}-01-02"}]}
+        calendar.save_events(c, "EPL", season, calendar.epl_events_from_fixtures(payload, season), "test")
+    ph = calendar.phases(c, "EPL")
+    assert {p.name for p in ph} == {"early_season", "mid_season", "late_season", "offseason"}
+    off = [p for p in ph if p.name == "offseason"][0]
+    assert off.start == date(2023, 5, 29) and off.end == date(2023, 8, 11)
+    assert [p for p in ph if p.season == 2023 and p.name == "late_season"][0].end == date(2024, 5, 19)
+
+
+def test_epl_fixture_file_with_impossible_dates_is_rejected():
+    assert calendar.epl_events_from_fixtures({"matches": [{"date": "2019-07-01"}, {"date": "2020-06-30"}]}, 2019) == {}
