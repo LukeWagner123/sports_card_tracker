@@ -5,7 +5,9 @@
 Writes, from Card Hedge daily prices:
   market_index.csv   weekly chained index per sport and grade (100 at the start)
   player_index.csv   weekly chained index per player, all their cards and grades combined
-  players.csv        one row per player: 90-day and 1-year index change, history, top PSA 10 price
+  players.csv        one row per player: 90-day and 1-year index change, history, top PSA 10 price,
+                     sales in the last 3 closed months and their change from the 3 before
+  sales_monthly.csv  sales count and dollars per sport per month (Card Hedge sales-stats)
   phases.csv         detrended median return per league, grade and season phase
   phase_seasons.csv  the same per season
   months.csv         detrended month-of-year effect per league and grade
@@ -86,22 +88,42 @@ def export_dashboard(conn: sqlite3.Connection, out: Path, min_history_days: int 
         if g == "PSA" and gr == 10.0:
             pid = cards[cid]["player_id"]
             top_psa10[pid] = max(top_psa10.get(pid, 0), s[-1][1])
+    sales: dict[int, list] = defaultdict(list)
+    for r in conn.execute("SELECT player_id, period_start, sales, total_usd FROM player_sales "
+                          "WHERE interval = 'month' AND source = ? ORDER BY period_start", (SOURCE,)):
+        sales[r["player_id"]].append((r["period_start"], r["sales"], r["total_usd"]))
+    names = {r["id"]: r for r in conn.execute("SELECT id, name, sport FROM players")}
+
     idx_rows, player_rows = [], []
-    for pid, members in by_player.items():
-        idx = chain([s for _, s in members])
-        if not idx or (idx[-1][0] - idx[0][0]).days < min_history_days:
-            continue
-        info = cards[members[0][0][0]]
-        for d, level, _ in _weekly(idx):
-            idx_rows.append((d.isoformat(), info["name"], info["sport"], round(level, 2)))
-        c90, c365 = change(idx, 90), change(idx, 365)
-        player_rows.append((info["name"], info["sport"],
+    for pid in sorted(set(by_player) | set(sales)):
+        members = by_player.get(pid, [])
+        idx = chain([s for _, s in members]) if members else []
+        long_enough = bool(idx) and (idx[-1][0] - idx[0][0]).days >= min_history_days
+        if long_enough:
+            for d, level, _ in _weekly(idx):
+                idx_rows.append((d.isoformat(), names[pid]["name"], names[pid]["sport"], round(level, 2)))
+        c90 = change(idx, 90) if long_enough else None
+        c365 = change(idx, 365) if long_enough else None
+        months = sales.get(pid, [])
+        last3 = sum(m[1] for m in months[-3:]) if len(months) >= 3 else None
+        prev3 = sum(m[1] for m in months[-6:-3]) if len(months) >= 6 else None
+        usd3 = sum(m[2] for m in months[-3:]) if len(months) >= 3 else None
+        player_rows.append((names[pid]["name"], names[pid]["sport"],
                             None if c90 is None else round(c90, 1), None if c365 is None else round(c365, 1),
-                            len({k[0] for k, _ in members}), idx[0][0].isoformat(),
-                            round(top_psa10[pid], 2) if pid in top_psa10 else None))
+                            len({k[0] for k, _ in members}), idx[0][0].isoformat() if idx else None,
+                            round(top_psa10[pid], 2) if pid in top_psa10 else None,
+                            last3, round((last3 / prev3 - 1) * 100, 1) if last3 is not None and prev3 else None,
+                            round(usd3 / last3, 2) if last3 else None))
     counts["player_index"] = _write(out / "player_index.csv", ["date", "player", "sport", "level"], idx_rows)
     counts["players"] = _write(out / "players.csv", ["player", "sport", "chg_90d", "chg_1y", "cards", "since",
-                                                     "psa10_price"], player_rows)
+                                                     "psa10_price", "sales_3m", "sales_chg", "avg_sale_3m"],
+                               player_rows)
+    monthly = conn.execute(
+        "SELECT substr(s.period_start, 1, 7) AS month, p.sport, SUM(s.sales) AS sales, ROUND(SUM(s.total_usd)) AS usd, "
+        "COUNT(DISTINCT s.player_id) AS players FROM player_sales s JOIN players p ON p.id = s.player_id "
+        "WHERE s.interval = 'month' AND s.source = ? GROUP BY 1, 2 ORDER BY 1, 2", (SOURCE,)).fetchall()
+    counts["sales_monthly"] = _write(out / "sales_monthly.csv", ["month", "sport", "sales", "usd", "players"],
+                                     [tuple(r) for r in monthly])
 
     phases, seasons, months, events = [], [], [], []
     for league in LEAGUES:

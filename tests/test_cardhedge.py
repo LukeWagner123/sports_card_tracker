@@ -192,6 +192,15 @@ SETS = {
 
 
 class SetClient(FakeClient):
+    def sales_stats_by_player(self, names, interval="month", periods=24):
+        self.calls += 1
+        self.stat_batches = getattr(self, "stat_batches", []) + [list(names)]
+        return [{"player": n, "buckets": [
+            {"start": "2026-09-01", "end": "2026-09-30", "count": 40, "total_amount": 4000.0, "average_sale": 100.0},
+            {"start": "2026-10-01", "end": "2026-10-31", "count": 0, "total_amount": 0, "average_sale": 0},
+            {"start": "2026-11-01", "end": "2026-11-03", "count": 5, "total_amount": 50.0, "average_sale": 10.0,
+             "partial": True}]} for n in names]
+
     def search_cards_sorted(self, set_name, page, page_size=100):
         self.calls += 1
         return {"cards": SETS.get(set_name, []) if page == 1 else []}
@@ -327,3 +336,21 @@ def test_unflagged_football_set_uses_known_rookie_seasons(conn):
         assert got == {"Real Rookie"}
     finally:
         del SETS[new]
+
+
+def test_player_sales_respects_bucket_limit_and_skips_partial_periods(conn):
+    client = SetClient()
+    ch.discover(conn, client, SPECS)
+    conn.execute("INSERT INTO players (id, name, sport) VALUES (900, 'Gabriel', 'soccer')")
+    conn.execute("INSERT INTO cards (id, player_id, year, set_name, card_number) VALUES (900, 900, 2023, 'Prizm', '9')")
+    conn.execute("INSERT INTO watchlist (card_id, added_at) VALUES (900, 'now')")
+    n_players = conn.execute("SELECT COUNT(DISTINCT c.player_id) FROM watchlist w JOIN cards c ON c.id = w.card_id"
+                             ).fetchone()[0] - 1                       # the one-word name is skipped
+    written = ch.fetch_player_sales(conn, client, today=TODAY)
+    assert written == 2 * n_players                                    # partial November dropped
+    assert all(len(b) * 24 <= 150 for b in client.stat_batches)
+    row = conn.execute("SELECT sales, total_usd, avg_usd FROM player_sales WHERE period_start = '2026-10-01' "
+                       "LIMIT 1").fetchone()
+    assert tuple(row) == (0, 0.0, None)
+    calls = client.calls
+    assert ch.fetch_player_sales(conn, client, today=TODAY + timedelta(days=3)) == 0 and client.calls == calls

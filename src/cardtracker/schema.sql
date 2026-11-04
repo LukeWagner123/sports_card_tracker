@@ -189,3 +189,17 @@ CREATE TABLE IF NOT EXISTS api_usage (
     calls         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (source, day)
 );
+
+-- Sales activity per player per period (e.g. Card Hedge sales-stats-by-player: every sale whose
+-- title names the player, all cards and grades). A demand signal; closed periods only.
+CREATE TABLE IF NOT EXISTS player_sales (
+    player_id     INTEGER NOT NULL REFERENCES players(id),
+    interval      TEXT NOT NULL,          -- 'month', 'week', 'day'
+    period_start  TEXT NOT NULL,
+    period_end    TEXT NOT NULL,
+    sales         INTEGER NOT NULL,
+    total_usd     REAL NOT NULL,
+    avg_usd       REAL,
+    source        TEXT NOT NULL,
+    PRIMARY KEY (player_id, interval, period_start, source)
+);

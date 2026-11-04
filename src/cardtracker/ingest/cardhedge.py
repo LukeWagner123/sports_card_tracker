@@ -86,6 +86,10 @@ class CardHedgeClient:
             raise QuotaExhausted(str(e)) from e
         return resp.json()
 
+    def sales_stats_by_player(self, names: list[str], interval: str = "month", periods: int = 24) -> list[dict]:
+        return self._post("sales-stats-by-player", {"players": names, "interval": interval, "periods": periods,
+                                                     "include_current": False}).get("results", [])
+
     def search_cards_sorted(self, set_name: str, page: int, page_size: int = 100) -> dict:
         return self._post("search-cards-wsort", {"set": set_name, "sort_by": "sales_30day",
                                                   "sort_order": "desc", "page": page, "page_size": page_size})
@@ -345,6 +349,54 @@ def fetch_player_index(conn: sqlite3.Connection, client: CardHedgeClient, today:
     return run.rows_written
 
 
+SALES_STATS_PERIODS = {"month": 24, "week": 52, "day": 90}     # the endpoint's maximum per interval
+SALES_STATS_MAX_BUCKETS = 150                                   # players x periods per request
+
+
+def fetch_player_sales(conn: sqlite3.Connection, client: CardHedgeClient, interval: str = "month",
+                       refresh_days: int = 7, today: date | None = None) -> int:
+    """Sales count, dollar total and average sale per closed period for every watchlist player.
+    A request may cover at most 150 player-periods (6 players at 24 months). Card Hedge matches the name against sale titles across all cards, so a
+    common name (or one shared with another athlete) overcounts."""
+    today = today or date.today()
+    prefix = f"sales-stats|{interval}|"
+    if _recently_fetched(conn, prefix, today, refresh_days):
+        return 0
+    # One-word names ('Gabriel', 'Andre') match unrelated sale titles, so they are left out.
+    players = [r for r in conn.execute(
+        "SELECT DISTINCT p.id, p.name FROM players p JOIN cards c ON c.player_id = p.id "
+        "JOIN watchlist w ON w.card_id = c.id ORDER BY p.id") if len(r["name"].split()) > 1]
+    by_name = {_fold(r["name"]): r["id"] for r in players}
+    written = 0
+    with track_run(conn, f"{SOURCE}:player_sales", compare_previous=False) as run:
+        try:
+            size = max(1, SALES_STATS_MAX_BUCKETS // SALES_STATS_PERIODS[interval])
+            for i in range(0, len(players), size):
+                if _stop(client, None):
+                    raise _Budget
+                chunk = [r["name"] for r in players[i:i + size]]
+                for res in client.sales_stats_by_player(chunk, interval, SALES_STATS_PERIODS[interval]):
+                    pid = by_name.get(_fold(res.get("player", "")))
+                    if pid is None:
+                        continue
+                    rows = [(pid, interval, b["start"], b["end"], int(b["count"]), float(b["total_amount"]),
+                             float(b["average_sale"]) if b["count"] else None, SOURCE)
+                            for b in res.get("buckets", []) if not b.get("partial")]
+                    conn.executemany(
+                        "INSERT INTO player_sales (player_id, interval, period_start, period_end, sales, total_usd, "
+                        "avg_usd, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (player_id, interval, "
+                        "period_start, source) DO UPDATE SET period_end = excluded.period_end, sales = excluded.sales, "
+                        "total_usd = excluded.total_usd, avg_usd = excluded.avg_usd", rows)
+                    written += len(rows)
+                conn.commit()
+            store_raw(conn, SOURCE, prefix + today.isoformat(), {"players": len(players), "rows": written})
+            conn.commit()
+        except (_Budget, QuotaExhausted):
+            pass
+        run.rows_written, run.idle = written, written == 0
+    return written
+
+
 # ---------------------------------------------------------------- discovery
 
 SPORT_WORD = {"basketball": "Basketball", "football": "Football", "soccer": "Soccer"}
@@ -532,8 +584,8 @@ def daily(conn: sqlite3.Connection, client: CardHedgeClient, budget: int = DAILY
           minutes: float | None = None, grades: list[str] | None = None, refresh_days: int = 14,
           today: date | None = None, specs: list[SetSpec] | None = None,
           rookie_seasons: dict[str, dict[str, set[int]]] | None = None) -> dict:
-    """One scheduled run: discovery, then prices grade by grade (PSA 10 first), then player
-    indexes. `budget` is the day's total across all runs (api_usage), leaving headroom for ad-hoc
+    """One scheduled run: discovery, weekly player sales counts (cheap: 6 players a call), then
+    prices grade by grade (PSA 10 first), then player indexes. `budget` is the day's total across all runs (api_usage), leaving headroom for ad-hoc
     use; `minutes` caps wall time (e.g. a CI job limit)."""
     used = calls_today(conn)
     client.set_budget(max(0, budget - used), minutes)
@@ -541,6 +593,7 @@ def daily(conn: sqlite3.Connection, client: CardHedgeClient, budget: int = DAILY
     try:
         report["discovered"] = discover(conn, client, specs, rookie_seasons=rookie_seasons)
         report["pruned"] = prune_discovered(conn)
+        report["player_sales"] = fetch_player_sales(conn, client, today=today)
         for label in grades or DEFAULT_GRADES:
             res = fetch_price_history(conn, client, [label], today=today, max_calls=None, refresh_days=refresh_days)
             report[label] = res["points"]

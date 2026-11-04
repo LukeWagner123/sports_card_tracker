@@ -84,6 +84,10 @@ calls. That keeps 430 cards current. A large backfill is faster run locally:
 cardtracker export dashboard --out data/dashboard   # CSVs behind the dashboard
 ```
 
+`ch daily` also pulls monthly sales counts per player (`player_sales`): every sale whose title
+names the player, two years back, 6 players per call (the endpoint allows 150 player-months per
+request). One-word names are skipped because they match unrelated sales.
+
 Market indexes per sport and grade, player indexes, and the seasonality tables. Indexes chain the
 average daily price change of their cards from 100, so cards entering or leaving don't move them
 (`src/cardtracker/analytics/chain_index.py`).
