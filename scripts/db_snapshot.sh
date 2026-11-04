@@ -45,13 +45,19 @@ case $action in
     echo "restored $db ($(du -h "$db" | cut -f1))"
     ;;
   save)
-    python3 - "$db" <<'PY'
+    # Snapshot a consistent copy (SQLite backup API), so saving while a pull is writing is safe.
+    mkdir -p "$work/copy"
+    python3 - "$db" "$work/copy/cards.db" <<'PY'
 import sqlite3, sys
-c = sqlite3.connect(sys.argv[1])
-assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "database failed its integrity check"
-c.execute("VACUUM")
+src = sqlite3.connect(sys.argv[1], timeout=120)
+dst = sqlite3.connect(sys.argv[2])
+src.backup(dst)
+assert dst.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "database failed its integrity check"
+dst.execute("VACUUM")
+dst.close()
 PY
-    xz -T0 -6 -c "$db" | crypt | split -b 90m - "$work/cards.db.xz.enc.part-"
+    xz -T0 -6 -c "$work/copy/cards.db" | crypt | split -b 90m - "$work/cards.db.xz.enc.part-"
+    rm -rf "$work/copy"
     cat > "$work/README.md" <<MD
 Encrypted database snapshot written by scripts/db_snapshot.sh. Restore with:
     CARDHEDGE_API_KEY=... scripts/db_snapshot.sh restore data/cards.db

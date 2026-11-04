@@ -78,6 +78,16 @@ Private repositories get 2,000 free Actions minutes a month, so 45 minutes a day
 calls. That keeps 430 cards current. A large backfill is faster run locally:
 `cardtracker ch daily` uses the full day's allowance in about 8 hours.
 
+## Charts
+
+```bash
+cardtracker export dashboard --out data/dashboard   # CSVs behind the dashboard
+```
+
+Market indexes per sport and grade, player indexes, and the seasonality tables. Indexes chain the
+average daily price change of their cards from 100, so cards entering or leaving don't move them
+(`src/cardtracker/analytics/chain_index.py`).
+
 ## SportsCardsPro price guide
 
 Current values per card by grade (raw, 7–9.5 any grader, PSA/BGS/SGC/CGC 10) plus yearly sales

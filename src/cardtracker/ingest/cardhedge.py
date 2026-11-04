@@ -309,41 +309,36 @@ def link_players(conn: sqlite3.Connection, client: CardHedgeClient, sport: str,
 
 def fetch_player_index(conn: sqlite3.Connection, client: CardHedgeClient, today: date | None = None,
                        refresh_days: int = 0, max_calls: int | None = None) -> int:
-    """Daily player index history for every linked player, back to the start of coverage."""
+    """Daily player index history for every linked player, from the start of coverage, in one
+    call per player (the endpoint serves up to 1,830 days). Re-fetched every refresh_days."""
     today = today or date.today()
     links = conn.execute("SELECT player_id, external_id FROM player_external_ids WHERE source = ?",
                          (SOURCE,)).fetchall()
     with track_run(conn, f"{SOURCE}:player_index", compare_previous=False) as run:
         try:
             for link in links:
-                for end, days in _windows(today, INDEX_FLOOR):
-                    key = f"index|{link['external_id']}|{end.isoformat()}"
-                    if end < today and _window_done(conn, key):
-                        continue
-                    if end == today and _recently_fetched(conn, key[:-10], today, refresh_days):
-                        continue
-                    if _stop(client, max_calls):
-                        raise _Budget
-                    start = end - timedelta(days=days - 1)       # start_date is inclusive here
-                    try:
-                        points = client.player_index_history(link["external_id"], start, end)
-                    except requests.HTTPError as e:
-                        # Card Hedge answers 404 for a window before the player's index existed.
-                        if e.response is None or e.response.status_code != 404:
-                            raise
-                        points = []
-                    store_raw(conn, SOURCE, key, {"points": len(points)})
-                    usable = [p for p in points if p.get("value") is not None and not p.get("withheld")]
-                    conn.executemany(
-                        "INSERT INTO player_index (player_id, date, value, volume_30d, card_count, source) "
-                        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (player_id, date, source) DO UPDATE SET "
-                        "value = excluded.value, volume_30d = excluded.volume_30d, card_count = excluded.card_count",
-                        [(link["player_id"], p["date"][:10], float(p["value"]), p.get("volume_30d"),
-                          p.get("card_count"), SOURCE) for p in usable])
-                    run.rows_written += len(usable)
-                    conn.commit()
-                    if not points and end < today:
-                        break
+                prefix = f"index|{link['external_id']}|all|"
+                if _recently_fetched(conn, prefix, today, refresh_days):
+                    continue
+                if _stop(client, max_calls):
+                    raise _Budget
+                try:
+                    points = client.player_index_history(link["external_id"], INDEX_FLOOR, today)
+                except requests.HTTPError as e:
+                    # Card Hedge answers 404 for a player without an index.
+                    if e.response is None or e.response.status_code != 404:
+                        raise
+                    points = []
+                store_raw(conn, SOURCE, prefix + today.isoformat(), {"points": len(points)})
+                usable = [p for p in points if p.get("value") is not None and not p.get("withheld")]
+                conn.executemany(
+                    "INSERT INTO player_index (player_id, date, value, volume_30d, card_count, source) "
+                    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (player_id, date, source) DO UPDATE SET "
+                    "value = excluded.value, volume_30d = excluded.volume_30d, card_count = excluded.card_count",
+                    [(link["player_id"], p["date"][:10], float(p["value"]), p.get("volume_30d"),
+                      p.get("card_count"), SOURCE) for p in usable])
+                run.rows_written += len(usable)
+                conn.commit()
         except (_Budget, QuotaExhausted):
             pass
         run.idle = run.rows_written == 0

@@ -155,7 +155,7 @@ def test_player_index_treats_404_as_start_of_history(conn):
 
     class NoOldIndex(FakeClient):
         def player_index_history(self, player_id, start, end):
-            if end.year < 2025:
+            if start.year < 2025:
                 resp = requests.Response()
                 resp.status_code = 404
                 raise requests.HTTPError(response=resp)
@@ -163,8 +163,10 @@ def test_player_index_treats_404_as_start_of_history(conn):
 
     client = NoOldIndex()
     ch.link_players(conn, client, "basketball")
-    assert ch.fetch_player_index(conn, client, today=TODAY) > 0
-    assert conn.execute("SELECT MIN(date) FROM player_index").fetchone()[0] == "2025-01-02"   # Jan 1 is withheld
+    assert ch.fetch_player_index(conn, client, today=TODAY) == 0       # 404: no index, not an error
+    calls = client.calls
+    ch.fetch_player_index(conn, client, today=TODAY, refresh_days=7)
+    assert client.calls == calls                                       # not asked again within a week
 
 
 # ---------------------------------------------------------------- discovery and daily runs

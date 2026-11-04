@@ -222,6 +222,15 @@ def cmd_ch(args) -> None:
         print(f"wrote {ch.fetch_player_index(conn, client)} player index points ({client.calls} calls)")
 
 
+def cmd_export_dashboard(args) -> None:
+    from pathlib import Path
+
+    from cardtracker.export import export_dashboard
+
+    for name, n in export_dashboard(open_db(), Path(args.out)).items():
+        print(f"{name}.csv: {n} rows")
+
+
 def cmd_trends_import(args) -> None:
     from cardtracker import trends
 
@@ -345,6 +354,11 @@ def main(argv: list[str] | None = None) -> None:
     cmp_ = sub.add_parser("compare", help="compare cards: grade multiples, liquidity, price vs. performance")
     cmp_.add_argument("--season", type=int, default=2025, help="NFL season for performance")
     cmp_.set_defaults(func=cmd_compare)
+
+    exp = sub.add_parser("export", help="write analysis tables as CSV").add_subparsers(dest="action", required=True)
+    expd = exp.add_parser("dashboard", help="market and player indexes, seasonality tables")
+    expd.add_argument("--out", default="data/dashboard")
+    expd.set_defaults(func=cmd_export_dashboard)
 
     tr = sub.add_parser("trends", help="Google Trends search interest").add_subparsers(dest="action", required=True)
     trimp = tr.add_parser("import", help="load Google Trends CSV exports (one player per file is best)")
