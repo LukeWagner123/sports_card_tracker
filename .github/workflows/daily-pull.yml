@@ -39,12 +39,13 @@ jobs:
       - run: pip install -e .
       - id: restore
         run: scripts/db_snapshot.sh restore "$CARDTRACKER_DB"
-      - name: Calendars
+      - name: Calendars and game results
         run: |
           cardtracker init-db
           cardtracker calendar fetch nfl
           cardtracker calendar fetch epl --first 2012 --last "$(date -u +%Y)"
           for f in calendars/*.csv; do cardtracker calendar import "$f"; done
+          cardtracker games fetch --first 2019
       - name: Card Hedge (saves a snapshot every hour)
         run: |
           cardtracker ch daily --budget 4800 --minutes 320 &

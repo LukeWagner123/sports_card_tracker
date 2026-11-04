@@ -222,6 +222,26 @@ def cmd_ch(args) -> None:
         print(f"wrote {ch.fetch_player_index(conn, client)} player index points ({client.calls} calls)")
 
 
+def cmd_games(args) -> None:
+    from datetime import date
+
+    from cardtracker import games
+    from cardtracker.analytics import game_reactions as gr
+
+    conn = open_db()
+    if args.action == "fetch":
+        last = date.today().year
+        print(f"NFL games: {games.ingest_nfl_games(conn)}")
+        print(f"NFL player games: {games.ingest_nfl_player_games(conn, list(range(args.first, last + 1)))}")
+        print(f"EPL games: {games.ingest_epl_games(conn, args.first, last)}")
+        return
+    rows = [r for r in gr.summarize(gr.reactions(conn, "NFL")) if r["grade"] == args.grade]
+    for gt in ("result", "streak", "performance", "game_type"):
+        print(f"\n{gt}  (median change vs trend after the game | share positive | n)")
+        for r in (x for x in rows if x["group_type"] == gt):
+            print(f"  {r['horizon_days']:>2}d  {r['group']:<15} {r['median_pct']:+6.2f}%  {r['hit_rate']:4.0%}  n={r['n']}")
+
+
 def cmd_export_dashboard(args) -> None:
     from pathlib import Path
 
@@ -354,6 +374,15 @@ def main(argv: list[str] | None = None) -> None:
     cmp_ = sub.add_parser("compare", help="compare cards: grade multiples, liquidity, price vs. performance")
     cmp_.add_argument("--season", type=int, default=2025, help="NFL season for performance")
     cmp_.set_defaults(func=cmd_compare)
+
+    gms = sub.add_parser("games", help="game results and price reactions to them").add_subparsers(
+        dest="action", required=True)
+    gf = gms.add_parser("fetch", help="NFL games and player game logs (nflverse), EPL results (openfootball)")
+    gf.add_argument("--first", type=int, default=2019, help="first season")
+    gf.set_defaults(func=cmd_games)
+    grp = gms.add_parser("report", help="NFL card price change after wins, losses, streaks, big games")
+    grp.add_argument("--grade", default="All grades", help='"PSA 10", "PSA 9", "Raw" or "All grades"')
+    grp.set_defaults(func=cmd_games)
 
     exp = sub.add_parser("export", help="write analysis tables as CSV").add_subparsers(dest="action", required=True)
     expd = exp.add_parser("dashboard", help="market and player indexes, seasonality tables")

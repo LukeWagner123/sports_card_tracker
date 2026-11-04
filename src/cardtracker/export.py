@@ -12,6 +12,9 @@ Writes, from Card Hedge daily prices:
   phase_seasons.csv  the same per season
   months.csv         detrended month-of-year effect per league and grade
   events.csv         detrended price path around season start and playoffs start, by week
+  game_reactions.csv NFL card price change 1-7 and 8-14 days after games, by result, team
+                     streak, the player's own output and regular season vs playoffs; horizon -14
+                     is the two weeks before the game (a check against momentum)
 """
 
 import csv
@@ -144,4 +147,10 @@ def export_dashboard(conn: sqlite3.Connection, out: Path, min_history_days: int 
     counts["months"] = _write(out / "months.csv", ["league", "grade", "month", "month_name", "median_pct",
                                                    "hit_rate", "n"], months)
     counts["events"] = _write(out / "events.csv", ["league", "event", "week", "median_pct", "n"], events)
+    from cardtracker.analytics import game_reactions as gr
+    cols = ["grade", "horizon_days", "group_type", "group", "median_pct", "mean_pct", "hit_rate", "n"]
+    rows = gr.summarize(gr.reactions(conn, "NFL")) + gr.summarize(
+        gr.reactions(conn, "NFL", pre=gr.BEFORE_PRE, horizons=gr.BEFORE))       # horizon -14: the 2 weeks before
+    counts["game_reactions"] = _write(out / "game_reactions.csv", ["league"] + cols,
+                                      [["NFL"] + [r[c] for c in cols] for r in rows])
     return counts

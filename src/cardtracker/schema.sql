@@ -203,3 +203,29 @@ CREATE TABLE IF NOT EXISTS player_sales (
     source        TEXT NOT NULL,
     PRIMARY KEY (player_id, interval, period_start, source)
 );
+
+-- Completed games with final scores (NFL from nflverse schedules, EPL from openfootball).
+CREATE TABLE IF NOT EXISTS games (
+    game_id       TEXT PRIMARY KEY,       -- nflverse game_id; EPL: 'EPL_<date>_<home>_<away>'
+    league        TEXT NOT NULL,
+    season        INTEGER NOT NULL,
+    week          INTEGER,
+    game_type     TEXT,                   -- 'REG', 'WC', 'DIV', 'CON', 'SB'; EPL: 'REG'
+    date          TEXT NOT NULL,
+    home          TEXT NOT NULL,
+    away          TEXT NOT NULL,
+    home_score    INTEGER NOT NULL,
+    away_score    INTEGER NOT NULL,
+    source        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_games_league_date ON games (league, date);
+
+-- A tracked player's appearance in a game: their team and their own output that day.
+CREATE TABLE IF NOT EXISTS player_games (
+    player_id     INTEGER NOT NULL REFERENCES players(id),
+    game_id       TEXT NOT NULL REFERENCES games(game_id),
+    team          TEXT NOT NULL,
+    fantasy_ppr   REAL,                   -- NFL: PPR fantasy points, one number for any position
+    source        TEXT NOT NULL,
+    PRIMARY KEY (player_id, game_id)
+);

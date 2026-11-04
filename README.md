@@ -78,6 +78,20 @@ Private repositories get 2,000 free Actions minutes a month, so 45 minutes a day
 calls. That keeps 430 cards current. A large backfill is faster run locally:
 `cardtracker ch daily` uses the full day's allowance in about 8 hours.
 
+## Game-level reactions (NFL)
+
+```bash
+cardtracker games fetch --first 2019     # NFL games + player game logs (nflverse), EPL results (openfootball)
+cardtracker games report --grade "PSA 10"
+```
+
+For every game a tracked player played, compares the card's price in the week before with the week
+after and the second week after (net of the card's trend), grouped by result, team win/loss streak,
+the player's own fantasy output (big/typical/bad game vs their average) and regular season vs
+playoffs. The export also measures the two weeks *before* each game: if cards had already moved
+before a result nobody knew, a difference afterwards is momentum, not a reaction. Premier League
+results are stored, but without rosters players aren't tied to their clubs' results yet.
+
 ## Charts
 
 ```bash
