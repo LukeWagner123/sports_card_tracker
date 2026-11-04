@@ -24,6 +24,9 @@ jobs:
     env:
       CARDTRACKER_DB: data/cards.db
       CARDHEDGE_API_KEY: ${{ secrets.CARDHEDGE_API_KEY }}
+      # Optional: a fine-grained token with Contents read/write on the private studio repo, so each
+      # run sends the card data to the personal site's Studio (scripts/push_studio.sh).
+      STUDIO_DATA_TOKEN: ${{ secrets.STUDIO_DATA_TOKEN }}
       SNAPSHOT_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
     steps:
       - name: Require the API key
@@ -59,3 +62,6 @@ jobs:
         # Never after a failed restore: that would replace the stored database with a new one.
         if: always() && steps.restore.outcome == 'success'
         run: scripts/db_snapshot.sh save "$CARDTRACKER_DB"
+      - name: Send card data to the Studio
+        if: success() && env.STUDIO_DATA_TOKEN != ''
+        run: scripts/push_studio.sh

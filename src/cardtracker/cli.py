@@ -242,6 +242,15 @@ def cmd_games(args) -> None:
             print(f"  {r['horizon_days']:>2}d  {r['group']:<15} {r['median_pct']:+6.2f}%  {r['hit_rate']:4.0%}  n={r['n']}")
 
 
+def cmd_export_studio(args) -> None:
+    from pathlib import Path
+
+    from cardtracker.export import export_studio
+
+    for name, size in export_studio(open_db(), Path(args.out)).items():
+        print(f"{name}: {size / 1024:,.0f} KB")
+
+
 def cmd_export_dashboard(args) -> None:
     from pathlib import Path
 
@@ -388,6 +397,9 @@ def main(argv: list[str] | None = None) -> None:
     expd = exp.add_parser("dashboard", help="market and player indexes, seasonality tables")
     expd.add_argument("--out", default="data/dashboard")
     expd.set_defaults(func=cmd_export_dashboard)
+    exps = exp.add_parser("studio", help="compact JSON for the personal site's private Studio")
+    exps.add_argument("--out", default="data/studio/cards")
+    exps.set_defaults(func=cmd_export_studio)
 
     tr = sub.add_parser("trends", help="Google Trends search interest").add_subparsers(dest="action", required=True)
     trimp = tr.add_parser("import", help="load Google Trends CSV exports (one player per file is best)")

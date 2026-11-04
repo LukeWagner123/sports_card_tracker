@@ -154,3 +154,65 @@ def export_dashboard(conn: sqlite3.Connection, out: Path, min_history_days: int 
     counts["game_reactions"] = _write(out / "game_reactions.csv", ["league"] + cols,
                                       [["NFL"] + [r[c] for c in cols] for r in rows])
     return counts
+
+
+def _num(v: str):
+    if v in ("", None):
+        return None
+    try:
+        f = float(v)
+    except ValueError:
+        return v
+    return int(f) if f.is_integer() and "." not in v else f
+
+
+def _rows(path: Path) -> list[dict]:
+    with path.open(newline="") as f:
+        return [{k: _num(v) for k, v in r.items()} for r in csv.DictReader(f)]
+
+
+def export_studio(conn: sqlite3.Connection, out: Path, as_of: str | None = None) -> dict[str, int]:
+    """The dashboard tables as compact JSON for the personal site's private Studio (cards/ in the
+    private studio repo). Per-player histories are split by sport so every file stays under
+    GitHub's 1 MB limit for reading a file through its contents API."""
+    import json
+    import tempfile
+    from datetime import datetime, timezone
+
+    out.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        counts = export_dashboard(conn, tmp)
+        t = {name: _rows(tmp / f"{name}.csv") for name in counts}
+    files: dict[str, object] = {}
+    market: dict = defaultdict(lambda: defaultdict(list))
+    for r in t["market_index"]:
+        market[r["sport"]][r["grade"]].append([r["date"], r["level"], r["series"]])
+    files["market.json"] = market
+    files["players.json"] = t["players"]
+    files["seasonality.json"] = {k: t[k] for k in ("phases", "phase_seasons", "months", "events")}
+    files["games.json"] = t["game_reactions"]
+    files["sales.json"] = t["sales_monthly"]
+    per_sport: dict = defaultdict(lambda: defaultdict(list))
+    for r in t["player_index"]:
+        per_sport[r["sport"]][r["player"]].append([r["date"], round(r["level"], 1)])
+    for sport, players in per_sport.items():
+        files[f"player-index-{sport}.json"] = players
+    sales: dict = defaultdict(list)
+    for r in conn.execute(
+            "SELECT p.name, s.period_start, s.sales, s.total_usd FROM player_sales s JOIN players p ON p.id = s.player_id "
+            "WHERE s.interval = 'month' ORDER BY s.period_start"):
+        sales[r["name"]].append([r["period_start"][:7], r["sales"], round(r["total_usd"])])
+    files["player-sales.json"] = sales
+    files["meta.json"] = {
+        "updated": as_of or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": "Card Hedge daily prices and sales counts; nflverse games; openfootball results",
+        "rows": counts,
+        "files": sorted(files),
+    }
+    sizes = {}
+    for name, data in files.items():
+        text = json.dumps(data, separators=(",", ":"))
+        (out / name).write_text(text)
+        sizes[name] = len(text)
+    return sizes

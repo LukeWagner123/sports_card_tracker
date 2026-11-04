@@ -92,6 +92,17 @@ playoffs. The export also measures the two weeks *before* each game: if cards ha
 before a result nobody knew, a difference afterwards is momentum, not a reaction. Premier League
 results are stored, but without rosters players aren't tied to their clubs' results yet.
 
+## Personal site Studio
+
+```bash
+scripts/push_studio.sh       # export JSON and commit it to cards/ in the private studio repo
+```
+
+The personal site's logged-in Studio (`/studio/cards`) reads `cards/*.json` from the private
+`LukeWagner123/studio` repo, never the site's own repo, because the prices are licensed Card
+Hedge data. The daily workflow runs this after each pull when the `STUDIO_DATA_TOKEN` secret (a
+fine-grained token with Contents read/write on the studio repo) is set.
+
 ## Charts
 
 ```bash

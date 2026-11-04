@@ -16,9 +16,13 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     path = path or db_path()
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    # A pull, an export and a snapshot can run at once: wait for a lock rather than failing after
+    # SQLite's default 5 seconds, and use WAL so readers never block the writer.
+    conn = sqlite3.connect(path, timeout=120)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    if path != ":memory:":
+        conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
