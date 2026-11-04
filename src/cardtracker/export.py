@@ -204,6 +204,19 @@ def export_studio(conn: sqlite3.Connection, out: Path, as_of: str | None = None)
             "WHERE s.interval = 'month' ORDER BY s.period_start"):
         sales[r["name"]].append([r["period_start"][:7], r["sales"], round(r["total_usd"])])
     files["player-sales.json"] = sales
+    from cardtracker.analytics import signals as sg
+    cache = sg.load(conn)
+    realistic = sg.backtest(conn, cache=cache, realistic=True)
+    naive = sg.backtest(conn, cache=cache, realistic=False)
+    files["signal-tests.json"] = {"realistic": realistic, "naive": naive, "fees": sg.FEES, "horizon_days": sg.HORIZON,
+                                  "passing": [t["signal"] for t in realistic if sg.passes(t)]}
+    files["deals.json"] = [r for r in sg.current(conn, cache=cache, tested=realistic) if "fair" in r]
+    cards, series, _ = cache
+    history: dict = defaultdict(lambda: defaultdict(dict))
+    for (cid, grade), ser in series.items():
+        history[cards[cid]["sport"]][str(cid)][grade] = sg.weekly_history(ser)
+    for sport, by_card in history.items():
+        files[f"card-history-{sport}.json"] = by_card
     files["meta.json"] = {
         "updated": as_of or datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": "Card Hedge daily prices and sales counts; nflverse games; openfootball results",
