@@ -76,3 +76,9 @@ def test_passes_requires_realistic_out_of_sample_and_size():
     assert not sg.passes({**good, "signal": "seasonal", "in_sample": True})
     assert not sg.passes({**good, "n": 50})
     assert not sg.passes({**good, "signal": "falling"})
+
+
+def test_weekly_history_drops_bad_prints():
+    pts = daily([60.0] * 30 + [1.0] + [60.0] * 30)
+    hist = sg.weekly_history(sg.Series(pts))
+    assert min(p for _, p in hist) == 60.0

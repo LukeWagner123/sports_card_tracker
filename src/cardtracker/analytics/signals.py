@@ -302,11 +302,21 @@ def _r(v: float | None) -> float | None:
     return None if v is None else round(v, 1)
 
 
+def _outlier(prices: list[float], i: int, k: int = 10, factor: float = 3.0) -> bool:
+    """A price more than `factor` times off the median of its 2k neighbours: a bad print
+    (e.g. a $1 'sale' of a $60 card), dropped from charts."""
+    near = prices[max(0, i - k):i] + prices[i + 1:i + 1 + k]
+    if len(near) < 4:
+        return False
+    m = median(near)
+    return prices[i] > m * factor or prices[i] < m / factor
+
+
 def weekly_history(series: Series, start: date | None = None) -> list[list]:
-    """[date, price] for the last observation in each week (for charts)."""
+    """[date, price] for the last observation in each week (for charts), bad prints removed."""
     out, week = [], None
-    for d, p in zip(series.dates, series.prices):
-        if start and d < start:
+    for i, (d, p) in enumerate(zip(series.dates, series.prices)):
+        if (start and d < start) or _outlier(series.prices, i):
             continue
         key = d - timedelta(days=d.weekday())
         if key == week:
