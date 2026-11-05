@@ -4,7 +4,7 @@ name: daily-pull
 # Needs the repository secret CARDHEDGE_API_KEY. Scheduled runs only start from the default branch.
 #
 # Throughput: Card Hedge allows 5,000 calls/day at 10/minute (~8.3 hours of calls), and a GitHub
-# job may run at most 6 hours, so two runs a day share the 4,800-call budget (counted per UTC day
+# job may run at most 6 hours, so two runs a day share the 4,950-call budget (counted per UTC day
 # in the database). Public repos have unlimited Actions minutes; a private repo's 2,000 free
 # minutes/month would allow only ~45 minutes a day (set --minutes 45 and one schedule).
 on:
@@ -51,7 +51,7 @@ jobs:
           cardtracker games fetch --first 2019
       - name: Card Hedge (saves a snapshot every hour)
         run: |
-          cardtracker ch daily --budget 4800 --minutes 320 &
+          cardtracker ch daily --budget 4950 --minutes 320 &
           pull=$!
           while kill -0 "$pull" 2>/dev/null; do
             for i in $(seq 360); do kill -0 "$pull" 2>/dev/null || break; sleep 10; done
