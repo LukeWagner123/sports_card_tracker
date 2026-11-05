@@ -229,3 +229,16 @@ CREATE TABLE IF NOT EXISTS player_games (
     source        TEXT NOT NULL,
     PRIMARY KEY (player_id, game_id)
 );
+
+-- Forward paper portfolio (analytics/market.py): what each strategy bought, at fair value, and sold.
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id         INTEGER PRIMARY KEY,
+    strategy   TEXT NOT NULL,
+    card_id    INTEGER NOT NULL REFERENCES cards(id),
+    grade      TEXT NOT NULL,
+    opened     TEXT NOT NULL,
+    entry_usd  REAL NOT NULL,
+    closed     TEXT,
+    exit_usd   REAL,
+    UNIQUE (strategy, card_id, grade, opened)
+);

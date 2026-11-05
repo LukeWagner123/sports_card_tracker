@@ -42,7 +42,7 @@ STALE_DAYS = 45
 HORIZON = 60
 FEES = 0.15            # round trip: eBay final value fee (~13%) plus shipping and supplies
 
-BUY_SIGNALS = ("near_low", "demand_lag", "seasonal")
+BUY_SIGNALS = ("near_low", "demand_lag", "seasonal", "cheap_grade", "cheap_vs_output")
 WARNINGS = ("falling", "thin")
 DESCRIPTIONS = {
     "near_low": "In the bottom 20% of its 52-week range",
@@ -50,6 +50,8 @@ DESCRIPTIONS = {
     "seasonal": "The league's calendar has pointed up 5%+ over the next two months",
     "falling": "Down 20%+ in the last 30 days",
     "thin": "Fewer than 6 priced days in 90: the price is a guess",
+    "cheap_grade": "This grade is unusually cheap next to the same card's other grade (PSA 10 vs PSA 9)",
+    "cheap_vs_output": "NFL PSA 10 in the cheapest fifth for the player's output, position and career stage",
     "all": "Every priced card (the market)",
     "combo": "Two or more buy signals at once",
 }
@@ -181,20 +183,25 @@ def _typical(s: Series, day: date, days: int = 14) -> float | None:
 
 
 def backtest(conn: sqlite3.Connection, start: date = date(2021, 1, 1), today: date | None = None,
-             cache=None, realistic: bool = True) -> list[dict]:
+             cache=None, realistic: bool = True, ctx=None) -> list[dict]:
     """Per signal: how the cards it fired on did over the next HORIZON days, against the market."""
+    from cardtracker.analytics.market import Context
     cards, series, sales = cache or load(conn)
     effects = month_effects(conn)
+    ctx = ctx or Context(conn, cards, series)
     today = today or date.today()
     excess: dict[str, list[float]] = defaultdict(list)
     raw: dict[str, list[float]] = defaultdict(list)
     day = start
     while day <= today - timedelta(days=HORIZON + 7):
         moves = []
+        extra = ctx.signals(day)
         for (cid, grade), s in series.items():
             card = cards[cid]
             snap = snapshot(s, day, demand_change(sales.get(card["player_id"], []), day),
                             seasonal_outlook(effects.get((LEAGUE[card["sport"]], grade), {}), day))
+            if snap:
+                snap.signals += extra.get((cid, grade), [])
             if realistic:
                 entry = _typical(s, day + timedelta(days=21))
                 later = _typical(s, day + timedelta(days=HORIZON + 7))
@@ -247,7 +254,8 @@ def passes(t: dict) -> bool:
             and t["n"] >= 100 and t["median_excess_pct"] >= 3 and t["hit_rate"] >= 0.53)
 
 
-def current(conn: sqlite3.Connection, today: date | None = None, cache=None, tested: list[dict] | None = None) -> list[dict]:
+def current(conn: sqlite3.Connection, today: date | None = None, cache=None, tested: list[dict] | None = None,
+            ctx=None) -> list[dict]:
     """Every card-grade priced now, with its numbers, signals, a play and a buy-under price.
 
     A signal counts toward a play only if it passes() its realistic backtest. The estimated edge
@@ -260,6 +268,9 @@ def current(conn: sqlite3.Connection, today: date | None = None, cache=None, tes
     tested = tested if tested is not None else backtest(conn, today=today, cache=(cards, series, sales))
     tested = [t for t in tested if t.get("method", "realistic") == "realistic"]
     worked = {t["signal"]: t["median_excess_pct"] for t in tested if passes(t)}
+    from cardtracker.analytics.market import Context
+    ctx = ctx or Context(conn, cards, series)
+    extra = ctx.signals(today)
     rows = []
     for (cid, grade), s in series.items():
         card = cards[cid]
@@ -268,6 +279,7 @@ def current(conn: sqlite3.Connection, today: date | None = None, cache=None, tes
         snap = snapshot(s, today, demand, outlook)
         if not snap:
             continue
+        snap.signals += extra.get((cid, grade), [])
         good = [x for x in snap.signals if x in worked]
         warn = [x for x in snap.signals if x in WARNINGS]
         edge = sum(worked[x] for x in good)

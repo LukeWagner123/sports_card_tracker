@@ -58,10 +58,12 @@ jobs:
             kill -0 "$pull" 2>/dev/null && scripts/db_snapshot.sh save "$CARDTRACKER_DB"
           done
           wait "$pull"
+      - name: Send card data to the Studio
+        # Before the save: the export also records the month's paper trades in the database.
+        if: success() && env.STUDIO_DATA_TOKEN != ''
+        continue-on-error: true
+        run: scripts/push_studio.sh
       - name: Save database
         # Never after a failed restore: that would replace the stored database with a new one.
         if: always() && steps.restore.outcome == 'success'
         run: scripts/db_snapshot.sh save "$CARDTRACKER_DB"
-      - name: Send card data to the Studio
-        if: success() && env.STUDIO_DATA_TOKEN != ''
-        run: scripts/push_studio.sh

@@ -171,7 +171,8 @@ def _rows(path: Path) -> list[dict]:
         return [{k: _num(v) for k, v in r.items()} for r in csv.DictReader(f)]
 
 
-def export_studio(conn: sqlite3.Connection, out: Path, as_of: str | None = None) -> dict[str, int]:
+def export_studio(conn: sqlite3.Connection, out: Path, as_of: str | None = None,
+                  step_paper: bool = True) -> dict[str, int]:
     """The dashboard tables as compact JSON for the personal site's private Studio (cards/ in the
     private studio repo). Per-player histories are split by sport so every file stays under
     GitHub's 1 MB limit for reading a file through its contents API."""
@@ -204,14 +205,37 @@ def export_studio(conn: sqlite3.Connection, out: Path, as_of: str | None = None)
             "WHERE s.interval = 'month' ORDER BY s.period_start"):
         sales[r["name"]].append([r["period_start"][:7], r["sales"], round(r["total_usd"])])
     files["player-sales.json"] = sales
+    from cardtracker.analytics import market as mk
     from cardtracker.analytics import signals as sg
     cache = sg.load(conn)
-    realistic = sg.backtest(conn, cache=cache, realistic=True)
-    naive = sg.backtest(conn, cache=cache, realistic=False)
+    cards, series, _ = cache
+    ctx = mk.Context(conn, cards, series)
+    today = date.today()
+    realistic = sg.backtest(conn, cache=cache, realistic=True, ctx=ctx)
+    naive = sg.backtest(conn, cache=cache, realistic=False, ctx=ctx)
     files["signal-tests.json"] = {"realistic": realistic, "naive": naive, "fees": sg.FEES, "horizon_days": sg.HORIZON,
                                   "passing": [t["signal"] for t in realistic if sg.passes(t)]}
-    files["deals.json"] = [r for r in sg.current(conn, cache=cache, tested=realistic) if "fair" in r]
-    cards, series, _ = cache
+    deals = [r for r in sg.current(conn, today=today, cache=cache, tested=realistic, ctx=ctx) if "fair" in r]
+    details = mk.card_details(ctx, today)
+    for r in deals:
+        r.update(details.get((r["card_id"], r["grade"]), {}))
+    files["deals.json"] = deals
+    vals = mk.valuation(cards, ctx.cleaned, ctx.games, ctx.positions, today)
+    fit = [(math.log(v["actual"]), math.log(v["expected"])) for v in vals.values()]
+    r2 = None
+    if len(fit) > 2:
+        ya = sum(a for a, _ in fit) / len(fit)
+        r2 = round(1 - sum((a - e) ** 2 for a, e in fit) / sum((a - ya) ** 2 for a, _ in fit), 3)
+    files["valuation.json"] = {"r2": r2, "as_of": today.isoformat(), "rows": [
+        {"card_id": cid, "player": cards[cid]["player"], "year": cards[cid]["year"], **v} for cid, v in vals.items()]}
+    players = mk.player_details(conn, ctx, deals, t["players"], today)
+    files["players-detail.json"] = players
+    if step_paper:
+        mk.paper_step(conn, deals, today)
+    titles = {r["card_id"]: f"{r['player']} {r['year']} {r['set']} #{r['number']}" for r in deals}
+    paper = mk.paper_summary(conn, deals, titles)
+    files["paper.json"] = paper
+    files["brief.json"] = mk.brief(ctx, deals, players, realistic, paper, sg.month_effects(conn), today)
     history: dict = defaultdict(lambda: defaultdict(dict))
     for (cid, grade), ser in series.items():
         history[cards[cid]["sport"]][str(cid)][grade] = sg.weekly_history(ser)
