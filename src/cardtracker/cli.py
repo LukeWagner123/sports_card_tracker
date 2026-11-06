@@ -362,7 +362,7 @@ def main(argv: list[str] | None = None) -> None:
     cday.add_argument("--budget", type=int, default=4800,
                       help="max Card Hedge calls per UTC day, counted across all runs (plan limit 5,000)")
     cday.add_argument("--minutes", type=float, help="stop after this many minutes (e.g. a CI time limit)")
-    cday.add_argument("--refresh-days", type=int, default=14, help="re-fetch the current year this often")
+    cday.add_argument("--refresh-days", type=int, default=3, help="re-fetch the current year this often")
     cday.set_defaults(func=cmd_ch)
 
     cal = sub.add_parser("calendar", help="league season dates").add_subparsers(dest="action", required=True)

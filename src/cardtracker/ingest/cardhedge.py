@@ -14,6 +14,7 @@ Docs: https://api.cardhedger.com/docs  (OpenAPI: https://api.cardhedger.com/open
 grade (PSA 10 first), then player indexes, stopping at the call budget or a time limit.
 """
 
+import json
 import os
 import re
 import sqlite3
@@ -413,14 +414,27 @@ class SetSpec:
 
 
 def default_sets(last_year: int = 2025) -> list[SetSpec]:
-    """Flagship sets: Panini Prizm rookies (NBA, NFL) since 2012, and the Premier League's
-    flagship chrome sets (Panini Prizm 2019-2024, Topps from 2025, when Topps took the licence).
-    Premier League cards trade on established stars, not rookies, so soccer keeps every player;
-    its sales are mostly inserts and parallels, so its base cards get a lower floor and deeper paging."""
+    """Each sport's main chrome rookie products, plus the Premier League's flagship sets.
+
+    NBA and NFL: Panini Prizm since 2012 (the deepest, up to 60 rookies a year), Donruss Optic
+    since 2016, Panini Select since 2013 and Mosaic since 2019 (up to 40 each), and Topps Chrome
+    from 2025, when Topps took the NBA licence and returned to football. Premier League cards
+    trade on established stars, not rookies, so soccer keeps every player; its sales are mostly
+    inserts and parallels, so its base cards get a lower floor and deeper paging (Panini Prizm
+    2019-2024, Topps from 2025). The sales floor keeps cards that barely trade out, so a wide cap
+    only adds cards with a market."""
     specs = []
-    for y in range(2012, last_year + 1):
-        specs.append(SetSpec("basketball", f"{y} Panini Prizm Basketball", True, 5, 30))
-        specs.append(SetSpec("football", f"{y} Panini Prizm Football", True, 5, 30))
+    for sport, word in (("basketball", "Basketball"), ("football", "Football")):
+        for y in range(2012, last_year + 1):
+            specs.append(SetSpec(sport, f"{y} Panini Prizm {word}", True, 5, 60, 10))
+        for y in range(2016, last_year + 1):
+            specs.append(SetSpec(sport, f"{y} Donruss Optic {word}", True, 5, 40, 8))
+        for y in range(2013, last_year + 1):
+            specs.append(SetSpec(sport, f"{y} Panini Select {word}", True, 5, 40, 8))
+        for y in range(2019, last_year + 1):
+            specs.append(SetSpec(sport, f"{y} Panini Mosaic {word}", True, 5, 40, 8))
+        for y in range(2025, last_year + 1):
+            specs.append(SetSpec(sport, f"{y} Topps Chrome {word}", True, 5, 60, 10))
     for y in range(2019, 2025):
         specs.append(SetSpec("soccer", f"{y} Panini Prizm Premier League Soccer", False, 1, 40, 10))
     specs.append(SetSpec("soccer", "2025 Topps Premier League Soccer", False, 1, 40, 10))
@@ -428,7 +442,8 @@ def default_sets(last_year: int = 2025) -> list[SetSpec]:
     return specs
 
 
-BASE_SUBSETS = {"", "base", "base set", "rookie", "rookies"}
+# Select's base set is tiered; its Concourse tier is the common base card.
+BASE_SUBSETS = {"", "base", "base set", "rookie", "rookies", "concourse"}
 
 
 def _is_base(card: dict) -> bool:
@@ -504,9 +519,10 @@ def discover(conn: sqlite3.Connection, client: CardHedgeClient, specs: list[SetS
     added: dict[str, int] = {}
     for spec in specs:
         key = f"discover|{spec.set_name}"
-        if conn.execute("SELECT 1 FROM raw_records WHERE source = ? AND external_id = ? AND fetched_at >= ?",
-                        (SOURCE, key, cutoff)).fetchone():
-            continue
+        last = conn.execute("SELECT payload FROM raw_records WHERE source = ? AND external_id = ? AND fetched_at >= ? "
+                            "ORDER BY id DESC LIMIT 1", (SOURCE, key, cutoff)).fetchone()
+        if last and json.loads(last["payload"]).get("max", 0) >= spec.max_cards:
+            continue                        # scanned recently with the same cap (a raised cap rescans)
         players = {_fold(r["name"]): r["id"] for r in
                    conn.execute("SELECT id, name FROM players WHERE sport = ?", (spec.sport,))}
         # Players with a card in an earlier year of this product: their card here isn't a rookie.
@@ -546,7 +562,7 @@ def discover(conn: sqlite3.Connection, client: CardHedgeClient, specs: list[SetS
             if (len(kept) >= spec.max_cards or len(cards) < 100
                     or (cards[-1].get("30 Day Sales") or 0) < spec.min_sales_30d):
                 break
-        store_raw(conn, SOURCE, key, {"cards": len(kept), "ids": ids})
+        store_raw(conn, SOURCE, key, {"cards": len(kept), "ids": ids, "max": spec.max_cards})
         conn.commit()
         added[spec.sport] = added.get(spec.sport, 0) + len(kept)
     return added
@@ -581,7 +597,7 @@ def prune_discovered(conn: sqlite3.Connection) -> int:
 
 
 def daily(conn: sqlite3.Connection, client: CardHedgeClient, budget: int = DAILY_LIMIT - 200,
-          minutes: float | None = None, grades: list[str] | None = None, refresh_days: int = 14,
+          minutes: float | None = None, grades: list[str] | None = None, refresh_days: int = 3,
           today: date | None = None, specs: list[SetSpec] | None = None,
           rookie_seasons: dict[str, dict[str, set[int]]] | None = None) -> dict:
     """One scheduled run: discovery, weekly player sales counts (cheap: 6 players a call), then

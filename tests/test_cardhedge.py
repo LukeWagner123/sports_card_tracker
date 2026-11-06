@@ -234,6 +234,9 @@ def test_discover_keeps_traded_base_rookies_and_all_epl_players(conn):
     assert tuple(epl) == ("Panini", "Prizm Premier League", 2023)
     calls = client.calls
     assert ch.discover(conn, client, SPECS) == {} and client.calls == calls     # not rescanned within 30 days
+    wider = [ch.SetSpec("basketball", NBA, True, 5, 60), SPECS[1]]
+    ch.discover(conn, client, wider)
+    assert client.calls == calls + 1                                            # a raised cap rescans that set only
 
 
 def test_year_to_date_refresh_waits_refresh_days(conn):
