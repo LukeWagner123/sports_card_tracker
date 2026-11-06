@@ -570,7 +570,8 @@ def discover(conn: sqlite3.Connection, client: CardHedgeClient, specs: list[SetS
 
 def prune_discovered(conn: sqlite3.Connection) -> int:
     """Delete discovered cards that the latest scan of their set no longer accepts, with their
-    prices. Only cards added by discover() are touched, and only for sets scanned with id lists."""
+    prices. Only cards added by discover() are touched, only for sets scanned with id lists, and
+    never one the paper portfolio has traded."""
     import json
     latest: dict[str, set[str]] = {}
     for r in conn.execute("SELECT external_id, payload FROM raw_records WHERE source = ? AND external_id LIKE "
@@ -586,8 +587,9 @@ def prune_discovered(conn: sqlite3.Connection) -> int:
             "JOIN card_external_ids x ON x.card_id = c.id AND x.source = ? WHERE w.notes = 'cardhedge discover'",
             (SOURCE,)):
         set_name = f"{r['year']} {r['manufacturer']} {r['set_name']} {SPORT_WORD[r['sport']]}"
-        if set_name in latest and r["external_id"] not in accepted:
-            doomed.append(r["id"])
+        if set_name in latest and r["external_id"] not in accepted and not conn.execute(
+                "SELECT 1 FROM paper_trades WHERE card_id = ?", (r["id"],)).fetchone():
+            doomed.append(r["id"])          # a card the paper portfolio holds stays, so its record does
     for card_id in doomed:
         for table in ("price_snapshots", "card_external_ids", "watchlist", "sales", "listings", "pop_snapshots"):
             conn.execute(f"DELETE FROM {table} WHERE card_id = ?", (card_id,))

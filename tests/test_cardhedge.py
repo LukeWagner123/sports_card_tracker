@@ -317,6 +317,10 @@ def test_inserts_labelled_base_are_rejected_and_pruned(conn):
         stale = ch._upsert_card(conn, insert, "basketball", players)
         conn.execute("INSERT INTO price_snapshots (card_id, grader, grade, price_usd, snapshot_date, source) "
                      "VALUES (?, 'PSA', 10, 5, '2026-01-01', 'cardhedge')", (stale,))
+        conn.execute("INSERT INTO paper_trades (strategy, card_id, grade, opened, entry_usd) "
+                     "VALUES ('market', ?, 'PSA 10', '2026-01-01', 5)", (stale,))
+        assert ch.prune_discovered(conn) == 0                   # the paper portfolio holds it
+        conn.execute("DELETE FROM paper_trades")
         assert ch.prune_discovered(conn) == 1
         assert conn.execute("SELECT COUNT(*) FROM cards WHERE id = ?", (stale,)).fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM price_snapshots WHERE card_id = ?", (stale,)).fetchone()[0] == 0
