@@ -58,6 +58,23 @@ def test_valuation_finds_cards_cheap_for_output():
     assert abs(v[8]["vs_output_pct"]) < 15 and not v[8]["cheap"]
 
 
+def test_valuation_compares_a_card_with_its_own_product():
+    """Mosaic base cards sell for a fraction of Prizm: that is the product, not a bargain."""
+    cards, series, games, pos = {}, {}, {}, {}
+    day = date(2025, 12, 1)
+    for i in range(60):
+        ppg = 8 + i % 10 * 2
+        mosaic = i % 2 == 1
+        price = 20 * ppg ** 1.5 * (0.25 if mosaic else 1.0)
+        cards[i] = {"player_id": i, "sport": "football", "year": 2022, "manufacturer": "Panini",
+                    "set_name": "Mosaic" if mosaic else "Prizm"}
+        series[(i, "PSA 10")] = daily([price] * 40, day - timedelta(days=39))
+        games[i] = [(day - timedelta(days=7 * k), 2025, float(ppg)) for k in range(10)]
+        pos[i] = mk.POSITIONS[i // 2 % 4]
+    v = mk.valuation(cards, series, games, pos, day)
+    assert all(abs(r["vs_output_pct"]) < 5 and not r["cheap"] for r in v.values())
+
+
 def test_production_needs_six_recent_games():
     g = [(D0 + timedelta(days=7 * k), 2024, 10.0) for k in range(5)]
     assert mk.production(g, D0 + timedelta(days=60)) is None

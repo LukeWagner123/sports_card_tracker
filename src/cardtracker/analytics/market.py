@@ -23,7 +23,7 @@ cleaned series (bad prints dropped) and medians where it can.
 import math
 import re
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, timedelta
 from statistics import mean, median, pstdev
 
@@ -220,9 +220,15 @@ def _ols(x: list[list[float]], y: list[float], ridge: float = 1e-3) -> list[floa
     return [b[i] / a[i][i] if abs(a[i][i]) > 1e-12 else 0.0 for i in range(k)]
 
 
-def _features(ppg: float, position: str, career: int) -> list[float]:
+def _features(ppg: float, position: str, career: int, product: str = "", products: tuple[str, ...] = ()) -> list[float]:
     return ([1.0, math.log(max(ppg, 1.0))] + [1.0 if position == p else 0.0 for p in POSITIONS[:-1]]
-            + [1.0 if min(career, 3) == c else 0.0 for c in (0, 1, 2)])
+            + [1.0 if min(career, 3) == c else 0.0 for c in (0, 1, 2)]
+            + [1.0 if product == p else 0.0 for p in products])
+
+
+def _product(card: dict) -> str:
+    """'Panini Prizm', 'Donruss Optic': base cards of different products price at different levels."""
+    return f"{card.get('manufacturer') or ''} {card.get('set_name') or ''}".strip()
 
 
 def valuation(cards: dict, series: dict, games: dict, positions: dict, day: date, min_n: int = 25) -> dict[int, dict]:
@@ -241,7 +247,11 @@ def valuation(cards: dict, series: dict, games: dict, positions: dict, day: date
         rows.append((cid, prod, price, positions[card["player_id"]], career))
     if len(rows) < min_n:
         return {}
-    x = [_features(p[0], pos, car) for _, p, _, pos, car in rows]
+    # Each product gets its own level (the most common is the base), so a Mosaic card is compared
+    # with Mosaic cards, not with Prizm. Products with few cards share the base level.
+    counts = Counter(_product(cards[r[0]]) for r in rows)
+    products = tuple(sorted(p for p, n in counts.items() if n >= 5 and p != counts.most_common(1)[0][0]))
+    x = [_features(p[0], pos, car, _product(cards[cid]), products) for cid, p, _, pos, car in rows]
     y = [math.log(price) for _, _, price, _, _ in rows]
     beta = _ols(x, y)
     out = {}
@@ -326,7 +336,10 @@ def player_details(conn: sqlite3.Connection, ctx: Context, deals: list[dict], pl
         mine = by_player.get(name, [])
         games = ctx.games.get(pid, []) if p["sport"] == "football" else []
         prod = production(games, day) if games else None
-        val = max((d for d in mine if d.get("vs_output_pct") is not None), key=lambda d: d["priced_days_90"], default=None)
+        # The player's read across all their valued PSA 10s (each against its own product), and the
+        # most-traded one as the card to open.
+        valued = [d for d in mine if d.get("vs_output_pct") is not None]
+        val = max(valued, key=lambda d: d["priced_days_90"], default=None)
         liq = [d for d in mine if d.get("liquidity")]
         best_liq = min((d["liquidity"] for d in liq), default=None)
         vols = [d["vol_pct"] for d in mine if d.get("vol_pct") is not None and d["grade"] == "PSA 10"]
@@ -336,7 +349,8 @@ def player_details(conn: sqlite3.Connection, ctx: Context, deals: list[dict], pl
             "chg_90d": p.get("chg_90d"), "chg_1y": p.get("chg_1y"), "market_90d": mkt_chg.get(p["sport"]),
             "sales_3m": p.get("sales_3m"), "sales_chg": p.get("sales_chg"), "avg_sale_3m": p.get("avg_sale_3m"),
             "seasons": by_season(games), "ppg": round(prod[0], 1) if prod else None,
-            "vs_output_pct": val["vs_output_pct"] if val else None, "expected": val["expected"] if val else None,
+            "vs_output_pct": round(median(d["vs_output_pct"] for d in valued), 1) if valued else None,
+            "vs_output_cards": len(valued), "expected": val["expected"] if val else None,
             "valued_card": val["card_id"] if val else None,
             "vol_pct": round(median(vols), 1) if vols else None, "corr": round(median(corrs), 2) if corrs else None,
             "liquidity": best_liq, "cards": sorted({d["card_id"] for d in mine}),
@@ -369,8 +383,11 @@ def verdict(e: dict) -> tuple[str, list[str]]:
             tags.append("lagging the market")
     if e["vs_output_pct"] is not None:
         v = e["vs_output_pct"]
-        pts.append(f"PSA 10 priced {abs(v):.0f}% {'under' if v < 0 else 'over'} what similar output at the same "
-                   f"position and career stage sells for ({e['ppg']} PPR points a game).")
+        n = e.get("vs_output_cards") or 1
+        what = "PSA 10 priced" if n == 1 else "PSA 10s priced a median"
+        pts.append(f"{what} {abs(v):.0f}% {'under' if v < 0 else 'over'} what similar output at the same "
+                   f"position and career stage sells for in the same set ({e['ppg']} PPR points a game"
+                   f"{'' if n == 1 else f', {n} cards'}).")
         if v <= -25:
             tags.append("cheap for the output")
         elif v >= 50:
