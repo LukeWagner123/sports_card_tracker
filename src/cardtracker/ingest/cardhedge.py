@@ -54,7 +54,8 @@ def calls_today(conn: sqlite3.Connection) -> int:
 class CardHedgeClient:
     def __init__(self, api_key: str | None = None, fetcher: Fetcher | None = None,
                  conn: sqlite3.Connection | None = None):
-        self.api_key = api_key or os.environ.get("CARDHEDGE_API_KEY")
+        # Stripped: a key pasted into a secret with a stray space or newline is an invalid header.
+        self.api_key = (api_key or os.environ.get("CARDHEDGE_API_KEY") or "").strip()
         if not self.api_key:
             raise RuntimeError("CARDHEDGE_API_KEY is not set")
         per_minute = float(os.environ.get("CARDHEDGE_REQUESTS_PER_MINUTE", "10"))

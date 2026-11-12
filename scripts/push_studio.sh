@@ -8,6 +8,7 @@
 # Commits only when the data changed. Override the repo with STUDIO_DATA_REPO (owner/name).
 set -euo pipefail
 repo=${STUDIO_DATA_REPO:-LukeWagner123/studio}
+STUDIO_DATA_TOKEN=$(printf %s "${STUDIO_DATA_TOKEN:-}" | tr -d "[:space:]")   # pasted tokens can carry spaces
 if [ -n "${STUDIO_DATA_TOKEN:-}" ]; then
   remote="https://x-access-token:${STUDIO_DATA_TOKEN}@github.com/${repo}.git"
 else
