@@ -24,6 +24,9 @@ jobs:
     env:
       CARDTRACKER_DB: data/cards.db
       CARDHEDGE_API_KEY: ${{ secrets.CARDHEDGE_API_KEY }}
+      # Encrypts the database on the data branch. Separate from the Card Hedge key, so replacing
+      # that key doesn't lock the stored database.
+      SNAPSHOT_KEY: ${{ secrets.SNAPSHOT_KEY }}
       # Optional: a fine-grained token with Contents read/write on the private studio repo, so each
       # run sends the card data to the personal site's Studio (scripts/push_studio.sh).
       STUDIO_DATA_TOKEN: ${{ secrets.STUDIO_DATA_TOKEN }}
@@ -33,6 +36,10 @@ jobs:
         run: |
           if [ -z "$CARDHEDGE_API_KEY" ]; then
             echo "::error::Add the repository secret CARDHEDGE_API_KEY (Settings > Secrets and variables > Actions)"
+            exit 1
+          fi
+          if [ -z "$SNAPSHOT_KEY" ]; then
+            echo "::error::Add the repository secret SNAPSHOT_KEY (the key the stored database is encrypted with)"
             exit 1
           fi
       - uses: actions/checkout@v4
