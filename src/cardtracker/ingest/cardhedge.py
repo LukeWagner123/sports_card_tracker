@@ -436,6 +436,10 @@ def default_sets(last_year: int = 2025) -> list[SetSpec]:
             specs.append(SetSpec(sport, f"{y} Panini Mosaic {word}", True, 5, 40, 8))
         for y in range(2025, last_year + 1):
             specs.append(SetSpec(sport, f"{y} Topps Chrome {word}", True, 5, 60, 10))
+        for y in range(2014, last_year + 1):      # Donruss: the Rated Rookie is the base rookie card
+            specs.append(SetSpec(sport, f"{y} Panini Donruss {word}", True, 5, 40, 8))
+    for y in range(2012, 2025):                   # Hoops: the NBA's entry-level base set (Panini until 2024-25)
+        specs.append(SetSpec("basketball", f"{y} Panini NBA Hoops", True, 5, 30, 6))
     for y in range(2019, 2025):
         specs.append(SetSpec("soccer", f"{y} Panini Prizm Premier League Soccer", False, 1, 40, 10))
     specs.append(SetSpec("soccer", "2025 Topps Premier League Soccer", False, 1, 40, 10))
@@ -444,7 +448,7 @@ def default_sets(last_year: int = 2025) -> list[SetSpec]:
 
 
 # Select's base set is tiered; its Concourse tier is the common base card.
-BASE_SUBSETS = {"", "base", "base set", "rookie", "rookies", "concourse"}
+BASE_SUBSETS = {"", "base", "base set", "rookie", "rookies", "concourse", "rated rookie", "rated rookies"}
 
 
 def _is_base(card: dict) -> bool:
@@ -600,7 +604,7 @@ def prune_discovered(conn: sqlite3.Connection) -> int:
 
 
 def daily(conn: sqlite3.Connection, client: CardHedgeClient, budget: int = DAILY_LIMIT - 200,
-          minutes: float | None = None, grades: list[str] | None = None, refresh_days: int = 3,
+          minutes: float | None = None, grades: list[str] | None = None, refresh_days: int = 1,
           today: date | None = None, specs: list[SetSpec] | None = None,
           rookie_seasons: dict[str, dict[str, set[int]]] | None = None) -> dict:
     """One scheduled run: discovery, weekly player sales counts (cheap: 6 players a call), then
