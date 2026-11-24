@@ -361,3 +361,25 @@ def test_player_sales_respects_bucket_limit_and_skips_partial_periods(conn):
     assert tuple(row) == (0, 0.0, None)
     calls = client.calls
     assert ch.fetch_player_sales(conn, client, today=TODAY + timedelta(days=3)) == 0 and client.calls == calls
+
+
+def test_ensure_cards_adds_a_missed_rookie_and_prune_keeps_it(conn):
+    set_name = "2017 Panini Prizm Football"
+    card = dict(set_card("PM", "Patrick Mahomes", set_name, "269", 0), subset="Base Set")
+
+    class C(SetClient):
+        def card_search(self, search=None, number=None, set_name=None, page_size=100):
+            self.calls += 1
+            return [card, dict(card, card_id="PMS", variant="Silver")]
+
+    client = C()
+    assert ch.ensure_cards(conn, client, [("football", set_name, "Patrick Mahomes")]) == 1
+    assert conn.execute("SELECT COUNT(*) FROM card_external_ids WHERE external_id = 'PM'").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM card_external_ids WHERE external_id = 'PMS'").fetchone()[0] == 0
+    calls = client.calls
+    ch.ensure_cards(conn, client, [("football", set_name, "Patrick Mahomes")])
+    assert client.calls == calls                                       # not searched again within 30 days
+    # A later sales-ranked scan of the set that doesn't include it must not prune it.
+    from cardtracker.db import store_raw
+    store_raw(conn, ch.SOURCE, f"discover|{set_name}", {"cards": 0, "ids": [], "max": 60})
+    assert ch.prune_discovered(conn) == 0

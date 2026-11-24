@@ -573,6 +573,45 @@ def discover(conn: sqlite3.Connection, client: CardHedgeClient, specs: list[SetS
     return added
 
 
+# Rookie cards kept whatever their sales rank: (sport, set, player). Starting NFL QBs since 2021
+# whose Prizm rookie the sales-ranked discovery missed, for the QB price study.
+MUST_TRACK = [("football", f"{y} Panini Prizm Football", name) for y, name in (
+    (2012, "Russell Wilson"), (2012, "Ryan Tannehill"), (2014, "Derek Carr"), (2014, "Jimmy Garoppolo"),
+    (2014, "Teddy Bridgewater"), (2015, "Marcus Mariota"), (2016, "Dak Prescott"), (2016, "Carson Wentz"),
+    (2016, "Jacoby Brissett"), (2017, "Patrick Mahomes"), (2017, "Deshaun Watson"), (2017, "Joshua Dobbs"),
+    (2018, "Mason Rudolph"), (2019, "Gardner Minshew"), (2021, "Zach Wilson"), (2021, "Davis Mills"),
+    (2022, "Desmond Ridder"), (2022, "Sam Howell"), (2023, "Aidan O'Connell"), (2024, "Spencer Rattler"),
+    (2025, "Cam Ward"))]
+
+
+def ensure_cards(conn: sqlite3.Connection, client: CardHedgeClient, wanted=None, recheck_days: int = 30) -> int:
+    """Add each wanted player's base rookie card from a set (one search call each), kept out of
+    prune_discovered. A player not found is searched again only after recheck_days."""
+    wanted = MUST_TRACK if wanted is None else wanted
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat(timespec="seconds")
+    added = 0
+    for sport, set_name, name in wanted:
+        key = f"ensure|{set_name}|{name}"
+        if conn.execute("SELECT 1 FROM raw_records WHERE source = ? AND external_id = ? AND fetched_at >= ?",
+                        (SOURCE, key, cutoff)).fetchone():
+            continue
+        if _stop(client, None):
+            break
+        found = [c for c in client.card_search(search=name, set_name=set_name)
+                 if c.get("set") == set_name and _fold(c.get("player") or "") == _fold(name) and _is_base(c)]
+        found.sort(key=lambda c: (not _is_rookie(c), -(c.get("30 Day Sales") or 0)))
+        ids = []
+        if found:
+            players = {_fold(r["name"]): r["id"] for r in conn.execute("SELECT id, name FROM players WHERE sport = ?", (sport,))}
+            card_id = _upsert_card(conn, found[0], sport, players)
+            conn.execute("UPDATE watchlist SET notes = 'cardhedge must-track' WHERE card_id = ?", (card_id,))
+            ids.append(found[0]["card_id"])
+            added += 1
+        store_raw(conn, SOURCE, key, {"ids": ids})
+        conn.commit()
+    return added
+
+
 def prune_discovered(conn: sqlite3.Connection) -> int:
     """Delete discovered cards that the latest scan of their set no longer accepts, with their
     prices. Only cards added by discover() are touched, only for sets scanned with id lists, and
@@ -616,6 +655,8 @@ def daily(conn: sqlite3.Connection, client: CardHedgeClient, budget: int = DAILY
     try:
         report["discovered"] = discover(conn, client, specs, rookie_seasons=rookie_seasons)
         report["pruned"] = prune_discovered(conn)
+        # Only with the default sets: a caller that passes its own specs chose its own universe.
+        report["must_track"] = ensure_cards(conn, client) if specs is None else 0
         report["player_sales"] = fetch_player_sales(conn, client, today=today)
         for label in grades or DEFAULT_GRADES:
             res = fetch_price_history(conn, client, [label], today=today, max_calls=None, refresh_days=refresh_days)
