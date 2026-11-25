@@ -28,17 +28,21 @@ def nfl_games_from_schedule(csv_text: str) -> list[tuple]:
     for g in csv.DictReader(io.StringIO(csv_text)):
         if g.get("home_score", "") == "" or g.get("away_score", "") == "":
             continue                                  # not played yet
+        spread = g.get("spread_line", "")
         rows.append((g["game_id"], "NFL", int(g["season"]), int(g["week"]), g["game_type"], g["gameday"],
                      g["home_team"], g["away_team"], int(float(g["home_score"])), int(float(g["away_score"])),
-                     "nflverse"))
+                     "nflverse", g.get("home_qb_name") or None, g.get("away_qb_name") or None,
+                     float(spread) if spread not in ("", "NA") else None))
     return rows
 
 
 def _save_games(conn: sqlite3.Connection, rows: list[tuple]) -> int:
     conn.executemany(
         "INSERT INTO games (game_id, league, season, week, game_type, date, home, away, home_score, away_score, "
-        "source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (game_id) DO UPDATE SET "
-        "home_score = excluded.home_score, away_score = excluded.away_score, date = excluded.date", rows)
+        "source, home_qb, away_qb, spread_line) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (game_id) "
+        "DO UPDATE SET home_score = excluded.home_score, away_score = excluded.away_score, date = excluded.date, "
+        "home_qb = excluded.home_qb, away_qb = excluded.away_qb, spread_line = excluded.spread_line",
+        [r if len(r) == 14 else (*r, None, None, None) for r in rows])
     return len(rows)
 
 

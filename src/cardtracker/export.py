@@ -235,6 +235,8 @@ def export_studio(conn: sqlite3.Connection, out: Path, as_of: str | None = None,
     titles = {r["card_id"]: f"{r['player']} {r['year']} {r['set']} #{r['number']}" for r in deals}
     paper = mk.paper_summary(conn, deals, titles)
     files["paper.json"] = paper
+    from cardtracker.analytics import qbs
+    files["qb-study.json"] = qbs.build(conn)
     files["brief.json"] = mk.brief(ctx, deals, players, realistic, paper, sg.month_effects(conn), today)
     history: dict = defaultdict(lambda: defaultdict(dict))
     for (cid, grade), ser in series.items():

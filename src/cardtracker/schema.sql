@@ -216,7 +216,10 @@ CREATE TABLE IF NOT EXISTS games (
     away          TEXT NOT NULL,
     home_score    INTEGER NOT NULL,
     away_score    INTEGER NOT NULL,
-    source        TEXT NOT NULL
+    source        TEXT NOT NULL,
+    home_qb       TEXT,                   -- NFL: starting QBs and the closing spread (points the home
+    away_qb       TEXT,                   -- team is favoured by), from nflverse
+    spread_line   REAL
 );
 CREATE INDEX IF NOT EXISTS ix_games_league_date ON games (league, date);
 

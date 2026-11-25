@@ -33,6 +33,9 @@ ADDED_COLUMNS = [
     ("listings", "bid_count", "INTEGER"),
     ("watchlist", "exclude_terms", "TEXT"),
     ("watchlist", "last_searched", "TEXT"),
+    ("games", "home_qb", "TEXT"),
+    ("games", "away_qb", "TEXT"),
+    ("games", "spread_line", "REAL"),
 ]
 
 
