@@ -132,6 +132,21 @@ def _fold(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower().strip()
 
 
+def _fold_name(text: str) -> str:
+    """A player name for matching across sources: folded, without dots and suffixes
+    ('Patrick Mahomes II' -> 'patrick mahomes', 'C.J. Stroud' -> 'cj stroud')."""
+    words = _fold(text).replace(".", "").split()
+    while words and words[-1] in {"jr", "sr", "ii", "iii", "iv", "v"}:
+        words.pop()
+    return " ".join(words)
+
+
+def _sample(cards: list[dict], n: int = 12) -> list[dict]:
+    """What a search returned, kept when it matched nothing, so names can be checked later."""
+    keys = ("set", "player", "number", "variant", "subset", "rookie", "30 Day Sales")
+    return [{k: c.get(k) for k in keys} for c in cards[:n]]
+
+
 def best_card(cards: list[dict], year: int, set_name: str, sport: str, number: str,
               parallel: str, player: str) -> dict | None:
     """The result for an exact card, or None if none fits.
@@ -526,7 +541,11 @@ def discover(conn: sqlite3.Connection, client: CardHedgeClient, specs: list[SetS
         key = f"discover|{spec.set_name}"
         last = conn.execute("SELECT payload FROM raw_records WHERE source = ? AND external_id = ? AND fetched_at >= ? "
                             "ORDER BY id DESC LIMIT 1", (SOURCE, key, cutoff)).fetchone()
-        if last and json.loads(last["payload"]).get("max", 0) >= spec.max_cards:
+        prev = json.loads(last["payload"]) if last else {}
+        empty_retry = prev.get("cards") == 0 and not prev.get("sample") and \
+            conn.execute("SELECT 1 FROM raw_records WHERE source = ? AND external_id = ? AND fetched_at >= ?", (
+                SOURCE, key, (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(timespec="seconds"))).fetchone() is None
+        if last and prev.get("max", 0) >= spec.max_cards and not empty_retry:
             continue                        # scanned recently with the same cap (a raised cap rescans)
         players = {_fold(r["name"]): r["id"] for r in
                    conn.execute("SELECT id, name FROM players WHERE sport = ?", (spec.sport,))}
@@ -540,12 +559,14 @@ def discover(conn: sqlite3.Connection, client: CardHedgeClient, specs: list[SetS
             (spec.sport, year, SPORT_WORD[spec.sport], product))}
         kept: set[int] = set()
         ids: list[str] = []
+        first_page: list[dict] = []
         seen_players: set[str] = set()      # one card per player per set: the most-sold one
         for page in range(1, spec.max_pages + 1):
             if _stop(client, None):
                 conn.commit()
                 return added
             cards = client.search_cards_sorted(spec.set_name, page).get("cards", [])
+            first_page = first_page or cards
             flagged = any(_is_rookie(c) for c in cards)
             for c in cards:
                 if len(kept) >= spec.max_cards:
@@ -567,19 +588,23 @@ def discover(conn: sqlite3.Connection, client: CardHedgeClient, specs: list[SetS
             if (len(kept) >= spec.max_cards or len(cards) < 100
                     or (cards[-1].get("30 Day Sales") or 0) < spec.min_sales_30d):
                 break
-        store_raw(conn, SOURCE, key, {"cards": len(kept), "ids": ids, "max": spec.max_cards})
+        payload = {"cards": len(kept), "ids": ids, "max": spec.max_cards}
+        if not kept:
+            payload["sample"] = _sample(first_page)
+        store_raw(conn, SOURCE, key, payload)
         conn.commit()
         added[spec.sport] = added.get(spec.sport, 0) + len(kept)
     return added
 
 
 # Rookie cards kept whatever their sales rank: (sport, set, player). Starting NFL QBs since 2021
-# whose Prizm rookie the sales-ranked discovery missed, for the QB price study.
+# whose Prizm rookie the sales-ranked discovery missed, for the QB price study. A miss keeps a
+# sample of what the search returned (raw_records 'ensure2|...').
 MUST_TRACK = [("football", f"{y} Panini Prizm Football", name) for y, name in (
     (2012, "Russell Wilson"), (2012, "Ryan Tannehill"), (2014, "Derek Carr"), (2014, "Jimmy Garoppolo"),
     (2014, "Teddy Bridgewater"), (2015, "Marcus Mariota"), (2016, "Dak Prescott"), (2016, "Carson Wentz"),
     (2016, "Jacoby Brissett"), (2017, "Patrick Mahomes"), (2017, "Deshaun Watson"), (2017, "Joshua Dobbs"),
-    (2018, "Mason Rudolph"), (2019, "Gardner Minshew"), (2021, "Zach Wilson"), (2021, "Davis Mills"),
+    (2018, "Mason Rudolph"), (2021, "Zach Wilson"), (2021, "Davis Mills"),
     (2022, "Desmond Ridder"), (2022, "Sam Howell"), (2023, "Aidan O'Connell"), (2024, "Spencer Rattler"),
     (2025, "Cam Ward"))]
 
@@ -591,14 +616,15 @@ def ensure_cards(conn: sqlite3.Connection, client: CardHedgeClient, wanted=None,
     cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat(timespec="seconds")
     added = 0
     for sport, set_name, name in wanted:
-        key = f"ensure|{set_name}|{name}"
+        key = f"ensure2|{set_name}|{name}"
         if conn.execute("SELECT 1 FROM raw_records WHERE source = ? AND external_id = ? AND fetched_at >= ?",
                         (SOURCE, key, cutoff)).fetchone():
             continue
         if _stop(client, None):
             break
-        found = [c for c in client.card_search(search=name, set_name=set_name)
-                 if c.get("set") == set_name and _fold(c.get("player") or "") == _fold(name) and _is_base(c)]
+        results = client.card_search(search=name, set_name=set_name)
+        found = [c for c in results
+                 if c.get("set") == set_name and _fold_name(c.get("player") or "") == _fold_name(name) and _is_base(c)]
         found.sort(key=lambda c: (not _is_rookie(c), -(c.get("30 Day Sales") or 0)))
         ids = []
         if found:
@@ -607,7 +633,7 @@ def ensure_cards(conn: sqlite3.Connection, client: CardHedgeClient, wanted=None,
             conn.execute("UPDATE watchlist SET notes = 'cardhedge must-track' WHERE card_id = ?", (card_id,))
             ids.append(found[0]["card_id"])
             added += 1
-        store_raw(conn, SOURCE, key, {"ids": ids})
+        store_raw(conn, SOURCE, key, {"ids": ids} if ids else {"ids": [], "sample": _sample(results)})
         conn.commit()
     return added
 

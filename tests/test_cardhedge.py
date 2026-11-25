@@ -1,3 +1,4 @@
+import json
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -365,7 +366,7 @@ def test_player_sales_respects_bucket_limit_and_skips_partial_periods(conn):
 
 def test_ensure_cards_adds_a_missed_rookie_and_prune_keeps_it(conn):
     set_name = "2017 Panini Prizm Football"
-    card = dict(set_card("PM", "Patrick Mahomes", set_name, "269", 0), subset="Base Set")
+    card = dict(set_card("PM", "Patrick Mahomes II", set_name, "269", 0), subset="Base Set")
 
     class C(SetClient):
         def card_search(self, search=None, number=None, set_name=None, page_size=100):
@@ -383,3 +384,16 @@ def test_ensure_cards_adds_a_missed_rookie_and_prune_keeps_it(conn):
     from cardtracker.db import store_raw
     store_raw(conn, ch.SOURCE, f"discover|{set_name}", {"cards": 0, "ids": [], "max": 60})
     assert ch.prune_discovered(conn) == 0
+
+
+def test_a_search_that_matches_nothing_keeps_a_sample(conn):
+    set_name = "2017 Panini Prizm Football"
+
+    class C(SetClient):
+        def card_search(self, search=None, number=None, set_name=None, page_size=100):
+            self.calls += 1
+            return [dict(set_card("X", "Someone Else", set_name, "1", 3), subset="Base Set")]
+
+    assert ch.ensure_cards(conn, C(), [("football", set_name, "Patrick Mahomes")]) == 0
+    payload = json.loads(conn.execute("SELECT payload FROM raw_records WHERE external_id LIKE 'ensure2|%'").fetchone()[0])
+    assert payload["ids"] == [] and payload["sample"][0]["player"] == "Someone Else"
