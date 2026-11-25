@@ -253,7 +253,7 @@ def findings(rows: list[dict], g: int) -> dict:
         ("Surprise win % (actual - expected)", lambda r: r["win_pct"] - r["exp_win_pct"]),
         ("Playoff wins", lambda r: r["playoff_wins"]),
         ("Change in fantasy pts/game", delta),
-        ("Defense rank (1 = best)", lambda r: r["def_rank"])], R)
+        ("Defense rank (higher = worse defense)", lambda r: r["def_rank"])], R)
     august = model("Known in August", [
         ("Preseason expected win % (weeks 1-3 spreads)", lambda r: r["pre_exp_win_pct"]),
         ("Last season's win %", lambda r: r["prev_win_pct"]),
