@@ -638,6 +638,19 @@ def ensure_cards(conn: sqlite3.Connection, client: CardHedgeClient, wanted=None,
     return added
 
 
+def misses(conn: sqlite3.Connection) -> list[str]:
+    """One line per search that matched nothing (must-track cards, discovered sets), with what
+    Card Hedge returned, for the run log: card names only, no prices."""
+    out = []
+    for r in conn.execute("SELECT external_id, payload FROM raw_records WHERE source = ? AND (external_id LIKE 'ensure2|%' "
+                          "OR external_id LIKE 'discover|%') AND payload LIKE '%\"sample\"%' ORDER BY id", (SOURCE,)):
+        sample = json.loads(r["payload"]).get("sample") or []
+        seen = "; ".join(f"{c.get('set')} | {c.get('player')} #{c.get('number')} | {c.get('variant')} | {c.get('subset')}"
+                         for c in sample[:5])
+        out.append(f"missed {r['external_id']}: {len(sample)} returned. {seen or 'nothing'}")
+    return out
+
+
 def prune_discovered(conn: sqlite3.Connection) -> int:
     """Delete discovered cards that the latest scan of their set no longer accepts, with their
     prices. Only cards added by discover() are touched, only for sets scanned with id lists, and

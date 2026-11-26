@@ -199,6 +199,8 @@ def cmd_ch(args) -> None:
                           rookie_seasons=rookie_seasons)
         print(" ".join(f"{k}={v}" for k, v in report.items()))
         print(f"Card Hedge calls today (UTC): {ch.calls_today(conn)}")
+        for line in ch.misses(conn):
+            print(line)
         return
     if args.action == "discover":
         print("added cards:", ch.discover(conn, client, rescan_days=args.rescan_days, rookie_seasons=rookie_seasons))

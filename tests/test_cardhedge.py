@@ -397,3 +397,12 @@ def test_a_search_that_matches_nothing_keeps_a_sample(conn):
     assert ch.ensure_cards(conn, C(), [("football", set_name, "Patrick Mahomes")]) == 0
     payload = json.loads(conn.execute("SELECT payload FROM raw_records WHERE external_id LIKE 'ensure2|%'").fetchone()[0])
     assert payload["ids"] == [] and payload["sample"][0]["player"] == "Someone Else"
+
+
+def test_misses_lists_what_an_empty_search_returned(conn):
+    from cardtracker.db import store_raw
+    store_raw(conn, ch.SOURCE, "ensure2|2017 Panini Prizm Football|Patrick Mahomes",
+              {"ids": [], "sample": [{"set": "2017 Panini Prizm", "player": "Patrick Mahomes II", "number": "269",
+                                      "variant": "Base", "subset": "Rookies"}]})
+    (line,) = ch.misses(conn)
+    assert "2017 Panini Prizm | Patrick Mahomes II #269 | Base | Rookies" in line
