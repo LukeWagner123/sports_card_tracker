@@ -406,3 +406,36 @@ def test_misses_lists_what_an_empty_search_returned(conn):
                                       "variant": "Base", "subset": "Rookies"}]})
     (line,) = ch.misses(conn)
     assert "2017 Panini Prizm | Patrick Mahomes II #269 | Base | Rookies" in line
+
+
+def test_ensure_by_number_skips_parallels_and_keeps_the_existing_player(conn):
+    set_name = "2017 Panini Prizm Football"
+    if not conn.execute("SELECT 1 FROM players WHERE name = 'Patrick Mahomes'").fetchone():
+        conn.execute("INSERT INTO players (name, sport) VALUES ('Patrick Mahomes', 'football')")
+    before = conn.execute("SELECT COUNT(*) FROM players").fetchone()[0]
+    base = dict(set_card("PMB", "Patrick Mahomes II", set_name, "269", 0), subset="Base Set")
+    silver = dict(base, card_id="PMS", variant="Silver")
+
+    class C(SetClient):
+        def card_search(self, search=None, number=None, set_name=None, page_size=100):
+            self.calls += 1
+            self.asked = (search, number)
+            return [silver, base]
+
+    client = C()
+    assert ch.ensure_cards(conn, client, [("football", set_name, "Patrick Mahomes", "269")]) == 1
+    assert client.asked == ("Mahomes", "269")
+    assert conn.execute("SELECT COUNT(*) FROM card_external_ids WHERE external_id = 'PMB'").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM players").fetchone()[0] == before     # no 'Patrick Mahomes II' added
+
+
+def test_ensure_by_number_matches_a_name_with_an_initial(conn):
+    set_name = "2017 Panini Prizm Football"
+    card = dict(set_card("JD", "R. Joshua Dobbs", set_name, "247", 0), subset="Base Set")
+
+    class C(SetClient):
+        def card_search(self, search=None, number=None, set_name=None, page_size=100):
+            self.calls += 1
+            return [card]
+
+    assert ch.ensure_cards(conn, C(), [("football", set_name, "Joshua Dobbs", "247")]) == 1

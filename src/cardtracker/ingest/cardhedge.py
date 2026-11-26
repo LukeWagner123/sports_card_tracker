@@ -601,39 +601,59 @@ def discover(conn: sqlite3.Connection, client: CardHedgeClient, specs: list[SetS
 # whose Prizm rookie the sales-ranked discovery missed, for the QB price study. A miss keeps a
 # sample of what the search returned (raw_records 'ensure2|...').
 MUST_TRACK = [("football", f"{y} Panini Prizm Football", name) for y, name in (
-    (2012, "Russell Wilson"), (2012, "Ryan Tannehill"), (2014, "Derek Carr"), (2014, "Jimmy Garoppolo"),
-    (2014, "Teddy Bridgewater"), (2015, "Marcus Mariota"), (2016, "Dak Prescott"), (2016, "Carson Wentz"),
-    (2016, "Jacoby Brissett"), (2017, "Patrick Mahomes"), (2017, "Deshaun Watson"), (2017, "Joshua Dobbs"),
+    (2012, "Russell Wilson"), (2014, "Derek Carr"), (2014, "Jimmy Garoppolo"), (2015, "Marcus Mariota"),
     (2018, "Mason Rudolph"), (2021, "Zach Wilson"), (2021, "Davis Mills"),
     (2022, "Desmond Ridder"), (2022, "Sam Howell"), (2023, "Aidan O'Connell"), (2024, "Spencer Rattler"),
     (2025, "Cam Ward"))]
+# Searched by card number: Card Hedge lists a card's parallels (Silver, Green, Disco, ...) first, so a
+# name search can return a dozen parallels and never the base card.
+MUST_TRACK += [("football", f"{y} Panini Prizm Football", name, number) for y, name, number in (
+    (2012, "Ryan Tannehill", "232"), (2014, "Teddy Bridgewater", "242"), (2016, "Dak Prescott", "231"),
+    (2016, "Carson Wentz", "218"), (2016, "Jacoby Brissett", "292"), (2017, "Patrick Mahomes", "269"),
+    (2017, "Deshaun Watson", "279"), (2017, "Joshua Dobbs", "247"))]
 
 
 def ensure_cards(conn: sqlite3.Connection, client: CardHedgeClient, wanted=None, recheck_days: int = 30) -> int:
     """Add each wanted player's base rookie card from a set (one search call each), kept out of
-    prune_discovered. A player not found is searched again only after recheck_days."""
+    prune_discovered. An entry may give the card number, which then decides the match (names vary:
+    'R. Joshua Dobbs', 'Patrick Mahomes II'). A player not found is searched again after recheck_days."""
     wanted = MUST_TRACK if wanted is None else wanted
     cutoff = (datetime.now(timezone.utc) - timedelta(days=recheck_days)).isoformat(timespec="seconds")
     added = 0
-    for sport, set_name, name in wanted:
-        key = f"ensure2|{set_name}|{name}"
+    for entry in wanted:
+        sport, set_name, name = entry[:3]
+        number = entry[3] if len(entry) > 3 else None
+        key = f"ensure3|{set_name}|{name}|#{number}" if number else f"ensure2|{set_name}|{name}"
         if conn.execute("SELECT 1 FROM raw_records WHERE source = ? AND external_id = ? AND fetched_at >= ?",
                         (SOURCE, key, cutoff)).fetchone():
             continue
         if _stop(client, None):
             break
-        results = client.card_search(search=name, set_name=set_name)
-        found = [c for c in results
-                 if c.get("set") == set_name and _fold_name(c.get("player") or "") == _fold_name(name) and _is_base(c)]
+        last = _fold_name(name).split()[-1]
+        if number:
+            results = client.card_search(search=name.split()[-1], number=number, set_name=set_name)
+            found = [c for c in results if c.get("set") == set_name and str(c.get("number", "")).lstrip("#") == number
+                     and last in _fold_name(c.get("player") or "").split() and _is_base(c)]
+        else:
+            results = client.card_search(search=name, set_name=set_name)
+            found = [c for c in results
+                     if c.get("set") == set_name and _fold_name(c.get("player") or "") == _fold_name(name) and _is_base(c)]
         found.sort(key=lambda c: (not _is_rookie(c), -(c.get("30 Day Sales") or 0)))
         ids = []
         if found:
-            players = {_fold(r["name"]): r["id"] for r in conn.execute("SELECT id, name FROM players WHERE sport = ?", (sport,))}
-            card_id = _upsert_card(conn, found[0], sport, players)
+            players = {}
+            for r in conn.execute("SELECT id, name FROM players WHERE sport = ?", (sport,)):
+                players.setdefault(_fold(r["name"]), r["id"])
+                players.setdefault(_fold_name(r["name"]), r["id"])
+            card = dict(found[0])
+            # Keep the player we already have ('Patrick Mahomes') rather than add 'Patrick Mahomes II'.
+            if _fold(card["player"]) not in players and _fold_name(name) in players:
+                card["player"] = name
+            card_id = _upsert_card(conn, card, sport, players)
             conn.execute("UPDATE watchlist SET notes = 'cardhedge must-track' WHERE card_id = ?", (card_id,))
             ids.append(found[0]["card_id"])
             added += 1
-        store_raw(conn, SOURCE, key, {"ids": ids} if ids else {"ids": [], "sample": _sample(results)})
+        store_raw(conn, SOURCE, key, {"ids": ids} if ids else {"ids": [], "sample": _sample(results, 25)})
         conn.commit()
     return added
 
@@ -642,11 +662,11 @@ def misses(conn: sqlite3.Connection) -> list[str]:
     """One line per search that matched nothing (must-track cards, discovered sets), with what
     Card Hedge returned, for the run log: card names only, no prices."""
     out = []
-    for r in conn.execute("SELECT external_id, payload FROM raw_records WHERE source = ? AND (external_id LIKE 'ensure2|%' "
+    for r in conn.execute("SELECT external_id, payload FROM raw_records WHERE source = ? AND (external_id LIKE 'ensure%' "
                           "OR external_id LIKE 'discover|%') AND payload LIKE '%\"sample\"%' ORDER BY id", (SOURCE,)):
         sample = json.loads(r["payload"]).get("sample") or []
         seen = "; ".join(f"{c.get('set')} | {c.get('player')} #{c.get('number')} | {c.get('variant')} | {c.get('subset')}"
-                         for c in sample[:5])
+                         for c in sample[:25 if r["external_id"].startswith("ensure3") else 5])
         out.append(f"missed {r['external_id']}: {len(sample)} returned. {seen or 'nothing'}")
     return out
 
